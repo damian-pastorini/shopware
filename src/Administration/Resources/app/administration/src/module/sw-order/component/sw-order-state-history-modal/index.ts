@@ -1,3 +1,4 @@
+import './sw-order-state-history-modal.scss';
 import type RepositoryType from 'src/core/data/repository.data';
 import type CriteriaType from 'src/core/data/criteria.data';
 import template from './sw-order-state-history-modal.html.twig';
@@ -23,6 +24,8 @@ interface StateMachineHistoryData {
     };
     entity: string;
     referencedId?: string;
+    internalComment?: string;
+    sourceType?: string;
 }
 
 interface CombinedStates {
@@ -68,6 +71,7 @@ export default Component.wrapComponentConfig({
             dataSource: [],
             limit: 10,
             page: 1,
+            /** @deprecated tag:v6.8.0 - Will be removed, use `dataSource.length` instead. */
             total: 0,
             steps: [
                 5,
@@ -82,8 +86,14 @@ export default Component.wrapComponentConfig({
             return this.repositoryFactory.create('state_machine_history');
         },
 
+        stateHistory(): StateMachineHistoryData[] {
+            const start = (this.page - 1) * this.limit;
+
+            return this.dataSource.slice(start, start + this.limit);
+        },
+
         stateMachineHistoryCriteria(): CriteriaType {
-            const criteria = new Criteria(this.page, this.limit);
+            const criteria = new Criteria(1, null);
 
             const entityIds = [
                 this.order.id,
@@ -120,27 +130,31 @@ export default Component.wrapComponentConfig({
             return [
                 {
                     property: 'createdAt',
-                    label: this.$tc('sw-order.stateHistoryModal.column.createdAt'),
+                    label: this.$t('sw-order.stateHistoryModal.column.createdAt'),
                 },
                 {
                     property: 'entity',
-                    label: this.$tc('sw-order.stateHistoryModal.column.entity'),
+                    label: this.$t('sw-order.stateHistoryModal.column.entity'),
                 },
                 {
                     property: 'user',
-                    label: this.$tc('sw-order.stateHistoryModal.column.user'),
+                    label: this.$t('sw-order.stateHistoryModal.column.user'),
                 },
                 {
                     property: 'transaction',
-                    label: this.$tc('sw-order.stateHistoryModal.column.transaction'),
+                    label: this.$t('sw-order.stateHistoryModal.column.transaction'),
                 },
                 {
                     property: 'delivery',
-                    label: this.$tc('sw-order.stateHistoryModal.column.delivery'),
+                    label: this.$t('sw-order.stateHistoryModal.column.delivery'),
                 },
                 {
                     property: 'order',
-                    label: this.$tc('sw-order.stateHistoryModal.column.order'),
+                    label: this.$t('sw-order.stateHistoryModal.column.order'),
+                },
+                {
+                    property: 'internalComment',
+                    label: this.$t('sw-order.stateHistoryModal.column.internalComment'),
                 },
             ];
         },
@@ -178,7 +192,6 @@ export default Component.wrapComponentConfig({
                 await this.getStateHistoryEntries();
             } catch (error: unknown) {
                 // @ts-expect-error
-                // eslint-disable-next-line max-len
                 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-assignment
                 const errorMessage = error?.response?.data?.errors?.[0]?.detail || '';
 
@@ -194,39 +207,40 @@ export default Component.wrapComponentConfig({
         getStateHistoryEntries(): Promise<EntityCollection<'state_machine_history'>> {
             return this.stateMachineHistoryRepository.search(this.stateMachineHistoryCriteria).then((fetchedEntries) => {
                 this.dataSource = this.buildStateHistory(fetchedEntries);
-                this.total = fetchedEntries.total ?? 1;
+                // @deprecated tag:v6.8.0 - Kept in sync only so `total` stays usable until it is removed.
+                this.total = this.dataSource.length;
                 return Promise.resolve(fetchedEntries);
             });
         },
 
         buildStateHistory(allEntries: EntityCollection<'state_machine_history'>): StateMachineHistoryData[] {
+            const initialStates = new Map<string, Entity<'state_machine_state'> | undefined>();
+
+            allEntries.forEach((entry) => {
+                if (!initialStates.has(entry.entityName)) {
+                    initialStates.set(entry.entityName, entry.fromStateMachineState);
+                }
+            });
+
             const states = {
-                order:
-                    allEntries.filter((entry) => {
-                        return entry.entityName === 'order';
-                    })[0]?.fromStateMachineState ?? this.order.stateMachineState,
+                order: initialStates.get('order') ?? this.order.stateMachineState,
                 order_transaction:
-                    allEntries.filter((entry) => {
-                        return entry.entityName === 'order_transaction';
-                    })[0]?.fromStateMachineState ?? this.order.transactions?.last()?.stateMachineState,
-                order_delivery:
-                    allEntries.filter((entry) => {
-                        return entry.entityName === 'order_delivery';
-                    })[0]?.fromStateMachineState ?? this.order.deliveries?.first()?.stateMachineState,
+                    initialStates.get('order_transaction') ?? this.order.transactions?.last()?.stateMachineState,
+                order_delivery: initialStates.get('order_delivery') ?? this.order.deliveries?.first()?.stateMachineState,
             };
 
             const entries = [] as Array<StateMachineHistoryData>;
 
-            if (this.page === 1) {
-                // @ts-expect-error - states exists
-                // Prepend start state
-                entries.push(this.createEntry(states, this.order));
-            }
+            // @ts-expect-error - states exists
+            // Prepend start state
+            entries.push(this.createEntry(states, this.order));
 
             const knownTransactionIds: string[] = [];
             allEntries.forEach((entry: Entity<'state_machine_history'>) => {
                 if (entry.entityName === 'order_transaction' && !knownTransactionIds.includes(entry.referencedId)) {
                     if (knownTransactionIds.length > 0) {
+                        const transaction = this.order.transactions?.get(entry.referencedId);
+
                         entries.push(
                             this.createEntry(
                                 {
@@ -234,7 +248,7 @@ export default Component.wrapComponentConfig({
                                     // @ts-expect-error - states exists
                                     order_transaction: entry.fromStateMachineState,
                                 },
-                                entry,
+                                transaction ?? entry,
                                 true,
                             ),
                         );
@@ -284,12 +298,12 @@ export default Component.wrapComponentConfig({
                 integration: 'integration' in entry ? entry.integration : undefined,
                 entity: 'entityName' in entry ? entry.entityName : entry.getEntityName(),
                 referencedId: 'referencedId' in entry ? entry.referencedId : entry.id,
+                internalComment: 'internalComment' in entry ? entry.internalComment : undefined,
+                sourceType: !hideUser && 'sourceType' in entry ? entry.sourceType : undefined,
             };
         },
 
         getVariantState(entity: string, state: Entity<'state_machine_state'>): string {
-            // eslint-disable-next-line max-len
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-call,@typescript-eslint/no-unsafe-return
             return this.stateStyleDataProviderService.getStyle(`${entity}.state`, state.technicalName).variant;
         },
 
@@ -300,8 +314,6 @@ export default Component.wrapComponentConfig({
         onPageChange({ page, limit }: { page: number; limit: number }): void {
             this.page = page;
             this.limit = limit;
-
-            void this.loadHistory();
         },
 
         enumerateTransaction(item: StateMachineHistoryData): string {
@@ -321,6 +333,9 @@ export default Component.wrapComponentConfig({
             if (item.integration) {
                 const integrationLabel = item.integration.label;
                 return `${integrationLabel} (${this.$t('sw-order.stateHistoryModal.labelIntegration')})`;
+            }
+            if (item.sourceType === 'sales-channel') {
+                return this.$t('sw-order.stateHistoryModal.labelCustomer');
             }
 
             return this.$t('sw-order.stateHistoryModal.labelSystemUser');

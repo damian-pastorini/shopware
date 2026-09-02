@@ -20,6 +20,7 @@ if (process.env.IPV4FIRST) {
 const isProdMode = process.env.NODE_ENV === 'production';
 const isHotMode = process.env.MODE === 'hot';
 const isDevMode = process.env.NODE_ENV !== 'production' && process.env.MODE !== 'hot';
+const isDebugMode = process.env.DEBUG === 'true';
 
 const projectRootPath = process.env.PROJECT_ROOT
     ? path.resolve(process.env.PROJECT_ROOT)
@@ -105,7 +106,7 @@ const coreConfig = {
         }
 
         if (isProdMode) {
-            return false;
+            return process.env.GENERATE_SOURCEMAPS === 'true' ? 'source-map' : false;
         }
 
         return 'inline-cheap-source-map';
@@ -200,6 +201,17 @@ const coreConfig = {
                                     loader: 'sass-loader',
                                     options: {
                                         sourceMap: true,
+                                        sassOptions: {
+                                            ...(!isDebugMode ? {
+                                                silenceDeprecations: [
+                                                    'import',
+                                                    'global-builtin',
+                                                    'color-functions',
+                                                    'mixed-decls',
+                                                    'slash-div',
+                                                ],
+                                            } : {}),
+                                        },
                                     },
                                 },
                             ],
@@ -313,6 +325,9 @@ const coreConfig = {
         },
     },
     stats: 'minimal',
+    infrastructureLogging: {
+        level: 'warn',
+    },
     target: 'web',
 };
 
@@ -366,6 +381,11 @@ const pluginConfigs = pluginEntries.map((plugin) => {
                 [plugin.technicalName]: plugin.filePath,
             },
             output: {
+                // Without an explicit unique name every build shares the default `webpackChunk` chunk
+                // loading global, which lets one build's runtime process another build's chunks and
+                // resolve a dynamic import to the wrong module. The core build keeps the default on
+                // purpose: renaming its global would change the runtime every shop already ships.
+                uniqueName: plugin.technicalName,
                 // In dev mode use same path as the core storefront to be able to access all files in multi-compiler-mode
                 path: isHotMode ? path.resolve(__dirname, 'dist') : path.resolve(plugin.path, '../dist/storefront'),
                 filename: isHotMode ? `./${plugin.technicalName}/[name].js` : `./js/${plugin.technicalName}/[name].js`,
@@ -427,7 +447,7 @@ if (isHotMode) {
     const scssDumpedThemeVariables = path.resolve(projectRootPath, `var/theme-variables/${themeId}.scss`);
     const scssDumpedVariables = (fs.existsSync(scssDumpedThemeVariables)) ? scssDumpedThemeVariables : scssDumpedFallbackVariables;
 
-    if (fs.existsSync(scssDumpedThemeVariables)) {
+    if (fs.existsSync(scssDumpedThemeVariables) && isDebugMode) {
         console.log(chalk.bgCyanBright.black(`# Theme variable file: ${scssDumpedVariables}`));
     }
     if (!fs.existsSync(scssDumpedThemeVariables)) {
@@ -482,9 +502,7 @@ const mergedCoreConfig = merge([
                     open: false,
                     devMiddleware: {
                         publicPath: `${hostName}/`,
-                        stats: {
-                            colors: true,
-                        },
+                        stats: 'none',
                     },
                     hot: false,
                     compress: false,
@@ -501,6 +519,7 @@ const mergedCoreConfig = merge([
                         overlay: {
                             warnings: false,
                             errors: true,
+                            runtimeErrors: false,
                         },
                     },
                     headers: {

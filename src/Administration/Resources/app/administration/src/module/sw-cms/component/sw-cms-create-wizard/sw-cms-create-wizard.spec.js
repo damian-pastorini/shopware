@@ -42,7 +42,7 @@ const expectedVisiblePageTypes = {
     },
 };
 
-async function createWrapper() {
+async function createWrapper(visiblePageTypes = Object.values(expectedVisiblePageTypes)) {
     return mount(
         await wrapTestComponent('sw-cms-create-wizard', {
             sync: true,
@@ -61,7 +61,7 @@ async function createWrapper() {
                             return expectedVisiblePageTypes[name];
                         },
                         getVisibleTypes: () => {
-                            return Object.values(expectedVisiblePageTypes);
+                            return visiblePageTypes;
                         },
                     },
                     customEntityDefinitionService: {
@@ -115,6 +115,43 @@ describe('module/sw-cms/component/sw-cms-create-wizard', () => {
         expect(typeSelection).toHaveLength(5);
     });
 
+    const selectionWidthDataProvider = [
+        [
+            4,
+            '620px',
+        ],
+        [
+            5,
+            '780px',
+        ],
+        [
+            6,
+            '460px',
+        ],
+        [
+            7,
+            '620px',
+        ],
+        [
+            11,
+            '620px',
+        ],
+    ];
+    it.each(selectionWidthDataProvider)(
+        'should balance %i page types into even rows of at most 5',
+        async (typeCount, expectedMaxWidth) => {
+            const pageTypes = Array.from({ length: typeCount }, (_, index) => ({
+                ...expectedVisiblePageTypes.page,
+                name: `page-type-${index}`,
+            }));
+
+            const wrapper = await createWrapper(pageTypes);
+            const typeSelection = wrapper.find('.sw-cms-create-wizard__page-type-selection');
+
+            expect(typeSelection.element.style.maxWidth).toBe(expectedMaxWidth);
+        },
+    );
+
     it('should display the correct step name', async () => {
         const wrapper = await createWrapper();
         expect(wrapper.vm.getStepName(1)).toBe('pageType');
@@ -155,7 +192,7 @@ describe('module/sw-cms/component/sw-cms-create-wizard', () => {
     it('should generate the correct pagePreviewMedia tag', async () => {
         const wrapper = await createWrapper();
         expect(wrapper.vm.pagePreviewMedia).toBe(
-            'url(administration/administration/static/img/cms/preview_landingpage_default.png)',
+            'url(administration/administration/static/img/cms/preview_landingpage_default.webp)',
         );
     });
 

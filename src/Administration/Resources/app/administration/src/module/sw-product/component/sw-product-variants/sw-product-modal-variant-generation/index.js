@@ -14,6 +14,7 @@ export default {
     template,
 
     inject: [
+        'feature',
         'repositoryFactory',
         'mediaService',
         'swProductDetailLoadAll',
@@ -26,6 +27,7 @@ export default {
 
     mixins: [
         Mixin.getByName('listing'),
+        Mixin.getByName('notification'),
     ],
 
     props: {
@@ -75,6 +77,30 @@ export default {
     },
 
     computed: {
+        variantGenerationTabs() {
+            const tabs = [
+                {
+                    label: this.$t('sw-product.variations.configuratorModal.selectOptions'),
+                    name: 'options',
+                },
+            ];
+
+            if (this.variantsNumber) {
+                tabs.push(
+                    {
+                        label: this.$t('sw-product.variations.configuratorModal.priceSurcharges'),
+                        name: 'prices',
+                    },
+                    {
+                        label: this.$t('sw-product.variations.configuratorModal.defineRestrictions'),
+                        name: 'restrictions',
+                    },
+                );
+            }
+
+            return tabs;
+        },
+
         currencies() {
             return Shopware.Store.get('swProductDetail').currencies;
         },
@@ -98,13 +124,13 @@ export default {
 
         progressMessage() {
             if (this.progressType === 'delete') {
-                return this.$tc('sw-product.variations.progressTypeDeleted');
+                return this.$t('sw-product.variations.progressTypeDeleted');
             }
             if (this.progressType === 'upsert') {
-                return this.$tc('sw-product.variations.progressTypeGenerated');
+                return this.$t('sw-product.variations.progressTypeGenerated');
             }
             if (this.progressType === 'calc') {
-                return this.$tc('sw-product.variations.progressTypeCalculated');
+                return this.$t('sw-product.variations.progressTypeCalculated');
             }
             return '';
         },
@@ -118,15 +144,15 @@ export default {
 
         buttonLabel() {
             if (this.variantsNumber <= 0) {
-                return this.$tc('sw-product.variations.deleteVariationsButton');
+                return this.$t('sw-product.variations.deleteVariationsButton');
             }
 
-            return this.$tc('sw-product.variations.generateVariationsButton');
+            return this.$t('sw-product.variations.generateVariationsButton');
         },
 
         isGenerateButtonDisabled() {
             return this.variantGenerationQueue.createQueue.some((item) => {
-                return item.downloads.length === 0 && item.productStates?.includes('is-download');
+                return item.downloads.length === 0 && item.type === 'digital';
             });
         },
     },
@@ -207,7 +233,10 @@ export default {
                         });
 
                         item.downloads = [];
-                        item.productStates = [];
+                        if (!Shopware.Feature.isActive('v6.8.0.0')) {
+                            item.productStates = [];
+                        }
+                        item.type = 'physical';
                         item.id = item.productNumber;
                         this.idToIndex[item.id] = index;
                     });
@@ -315,7 +344,7 @@ export default {
             this.variantGenerationQueue.createQueue.forEach((item) => {
                 delete item.id;
 
-                if (item.productStates.includes('is-download')) {
+                if (item.type === 'digital') {
                     item.maxPurchase = 1;
                     item.minPurchase = 1;
                     item.isCloseout = false;
@@ -333,8 +362,17 @@ export default {
             this.variantsGenerator
                 .saveVariants(this.variantGenerationQueue)
                 .then(() => {
+                    return this.variantsGenerator.saveVariantRestrictions();
+                })
+                .then(() => {
+                    return this.variantsGenerator.saveVariantListingConfig();
+                })
+                .then(() => {
                     this.addOriginalConfiguratorSettings();
-                    return this.productRepository.save(this.product);
+                    return this.variantsGenerator.saveConfiguratorSettings(
+                        this.product.configuratorSettings,
+                        this.variantGenerationQueue.createQueue,
+                    );
                 })
                 .then(() => {
                     this.$emit('variations-finish-generate');
@@ -344,6 +382,15 @@ export default {
                     this.maxProgress = 0;
 
                     this.swProductDetailLoadAll();
+                })
+                .catch(() => {
+                    this.isLoading = false;
+                    this.actualProgress = 0;
+                    this.maxProgress = 0;
+
+                    this.createNotificationError({
+                        message: this.$t('sw-product.variations.generatedListMessageGenerateError'),
+                    });
                 });
         },
 
@@ -388,9 +435,13 @@ export default {
                 this.usageOfFiles = {};
                 variants.forEach((item) => {
                     item.downloads = [];
-                    item.productStates = [];
+                    if (!Shopware.Feature.isActive('v6.8.0.0')) {
+                        item.productStates = [];
+                    }
+                    item.type = 'physical';
                 });
                 this.getList();
+
                 return;
             }
 
@@ -398,7 +449,10 @@ export default {
                 item.downloads = [...this.downloadFilesForAllVariants];
                 this.updateUsageForAllVariantFiles(item.id);
 
-                item.productStates = ['is-download'];
+                if (!Shopware.Feature.isActive('v6.8.0.0')) {
+                    item.productStates = ['is-download'];
+                }
+                item.type = 'digital';
             });
 
             this.getList();
@@ -417,14 +471,21 @@ export default {
                 });
 
                 item.downloads = [];
-                item.productStates = [];
+                if (!Shopware.Feature.isActive('v6.8.0.0')) {
+                    item.productStates = [];
+                }
+                item.type = 'physical';
+
                 return;
             }
 
             item.downloads = [...this.downloadFilesForAllVariants];
             this.updateUsageForAllVariantFiles(item.id);
 
-            item.productStates = ['is-download'];
+            if (!Shopware.Feature.isActive('v6.8.0.0')) {
+                item.productStates = ['is-download'];
+            }
+            item.type = 'digital';
         },
 
         isUploadDisabled(item) {
@@ -459,7 +520,7 @@ export default {
                 }
 
                 variants.forEach((currentItem) => {
-                    if (currentItem.productStates.includes('is-download')) {
+                    if (currentItem.type === 'digital') {
                         if (this.isExistingMedia(currentItem.downloads, event.targetId)) {
                             return;
                         }
@@ -495,7 +556,6 @@ export default {
             this.originalConfiguratorSettings.forEach((configSetting) => {
                 this.product.configuratorSettings.add(configSetting);
             });
-
             this.calcVariantsNumber();
         },
 

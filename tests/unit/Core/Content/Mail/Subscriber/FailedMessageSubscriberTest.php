@@ -6,12 +6,15 @@ use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Shopware\Core\Content\Mail\Subscriber\FailedMessageSubscriber;
+use Shopware\Core\Framework\Log\Package;
+use Symfony\Component\Clock\NativeClock;
 use Symfony\Component\Mailer\Event\FailedMessageEvent;
 use Symfony\Component\Mime\RawMessage;
 
 /**
  * @internal
  */
+#[Package('after-sales')]
 #[CoversClass(FailedMessageSubscriber::class)]
 class FailedMessageSubscriberTest extends TestCase
 {
@@ -31,7 +34,7 @@ class FailedMessageSubscriberTest extends TestCase
             ->method('insert')
             ->with(
                 static::equalTo('log_entry'),
-                static::callback(function (array $entry) {
+                static::callback(static function (array $entry) {
                     static::assertArrayHasKey('id', $entry);
                     static::assertArrayHasKey('message', $entry);
                     static::assertArrayHasKey('level', $entry);
@@ -56,7 +59,7 @@ class FailedMessageSubscriberTest extends TestCase
                 })
             );
 
-        $subscriber = new FailedMessageSubscriber($connection);
+        $subscriber = new FailedMessageSubscriber($connection, new NativeClock());
 
         $event = new FailedMessageEvent(
             new RawMessage('Test Message'),

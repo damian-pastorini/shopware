@@ -5,6 +5,7 @@ namespace Shopware\Tests\Unit\Core\Service\ServiceRegistry;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Service\ServiceException;
 use Shopware\Core\Service\ServiceRegistry\Client as ServiceRegistryClient;
 use Shopware\Core\Service\ServiceRegistry\SaveConsentRequest;
@@ -12,10 +13,12 @@ use Shopware\Core\Service\ServiceRegistry\ServiceEntry;
 use Symfony\Component\HttpClient\Exception\TransportException;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
  * @internal
  */
+#[Package('framework')]
 #[CoversClass(ServiceRegistryClient::class)]
 class ClientTest extends TestCase
 {
@@ -23,24 +26,36 @@ class ClientTest extends TestCase
     {
         yield 'not-json' => [''];
 
-        yield 'no-services-key' => [json_encode(['blah' => [1, 2, 3]])];
+        yield 'no-services-key' => [json_encode(['blah' => [1, 2, 3]], \JSON_THROW_ON_ERROR)];
 
-        yield 'not-correct-list' => [json_encode(['services' => [1, 2, 3]])];
+        yield 'not-correct-list' => [json_encode(['services' => [1, 2, 3]], \JSON_THROW_ON_ERROR)];
 
-        yield 'not-correct-service-definition' => [json_encode(['services' => [['not-valid' => 1]]])];
+        yield 'not-correct-service-definition' => [json_encode(['services' => [['not-valid' => 1]]], \JSON_THROW_ON_ERROR)];
 
-        yield 'missing-label' => [json_encode(['services' => [['name' => 'SomeService']]])];
+        yield 'missing-label' => [json_encode(['services' => [['name' => 'SomeService']]], \JSON_THROW_ON_ERROR)];
 
-        yield 'missing-host' => [json_encode(['services' => [['name' => 'SomeService', 'label' => 'SomeService']]])];
+        yield 'missing-host' => [json_encode(['services' => [['name' => 'SomeService', 'label' => 'SomeService']]], \JSON_THROW_ON_ERROR)];
 
-        yield 'missing-app-endpoint' => [json_encode(['services' => [['name' => 'SomeService', 'label' => 'SomeService', 'host' => 'https://www.someservice.com']]])];
+        yield 'missing-app-endpoint' => [
+            json_encode([
+                'services' => [
+                    [
+                        'name' => 'SomeService',
+                        'label' => 'SomeService',
+                        'host' => 'https://www.someservice.com',
+                    ],
+                ],
+            ], \JSON_THROW_ON_ERROR),
+        ];
 
-        yield '1-valid-1-invalid' => [json_encode([
-            'services' => [
-                ['name' => 'SomeService', 'label' => 'SomeService', 'host' => 'https://www.someservice.com', 'app-endpoint' => '/register'],
-                ['not-valid' => 1],
-            ],
-        ])];
+        yield '1-valid-1-invalid' => [
+            json_encode([
+                'services' => [
+                    ['name' => 'SomeService', 'label' => 'SomeService', 'host' => 'https://www.someservice.com', 'app-endpoint' => '/register'],
+                    ['not-valid' => 1],
+                ],
+            ], \JSON_THROW_ON_ERROR),
+        ];
     }
 
     #[DataProvider('invalidResponseProvider')]
@@ -50,7 +65,7 @@ class ClientTest extends TestCase
             $response = new MockResponse($response),
         ]);
 
-        $registryClient = new ServiceRegistryClient('https://www.shopware.com', $client);
+        $registryClient = new ServiceRegistryClient('https://www.shopware.com', 'https://example.com', $client);
 
         static::assertSame([], $registryClient->getAll());
         static::assertSame('https://www.shopware.com/api/service/?page=1&limit=10', $response->getRequestUrl());
@@ -59,10 +74,10 @@ class ClientTest extends TestCase
     public function testFailRequestReturnsEmptyListOfServices(): void
     {
         $client = new MockHttpClient([
-            $response = new MockResponse('', ['http_code' => 503]),
+            $response = new MockResponse('', ['http_code' => Response::HTTP_SERVICE_UNAVAILABLE]),
         ]);
 
-        $registryClient = new ServiceRegistryClient('https://www.shopware.com', $client);
+        $registryClient = new ServiceRegistryClient('https://www.shopware.com', 'https://example.com', $client);
 
         static::assertSame([], $registryClient->getAll());
         static::assertSame('https://www.shopware.com/api/service/?page=1&limit=10', $response->getRequestUrl());
@@ -73,15 +88,15 @@ class ClientTest extends TestCase
         $service = [
             'services' => [
                 ['name' => 'MyCoolService1', 'host' => 'https://coolservice1.com', 'label' => 'My Cool Service 1', 'app-endpoint' => '/app-endpoint'],
-                ['name' => 'MyCoolService2', 'host' => 'https://coolservice2.com', 'label' => 'My Cool Service 2', 'app-endpoint' => '/app-endpoint', 'license-sync-endpoint' => '/license-sync-endpoint'],
+                ['name' => 'MyCoolService2', 'host' => 'https://coolservice2.com', 'label' => 'My Cool Service 2', 'app-endpoint' => '/app-endpoint'],
             ],
         ];
 
         $client = new MockHttpClient([
-            $response = new MockResponse((string) json_encode($service)),
+            $response = new MockResponse((string) json_encode($service, \JSON_THROW_ON_ERROR)),
         ]);
 
-        $registryClient = new ServiceRegistryClient('https://www.shopware.com', $client);
+        $registryClient = new ServiceRegistryClient('https://www.shopware.com', 'https://example.com', $client);
 
         $entries = $registryClient->getAll();
 
@@ -91,13 +106,11 @@ class ClientTest extends TestCase
         static::assertSame('My Cool Service 1', $entries[0]->description);
         static::assertSame('https://coolservice1.com', $entries[0]->host);
         static::assertSame('/app-endpoint', $entries[0]->appEndpoint);
-        static::assertNull($entries[0]->licenseSyncEndPoint);
         static::assertSame('MyCoolService2', $entries[1]->name);
         static::assertSame('My Cool Service 2', $entries[1]->description);
         static::assertSame('https://coolservice2.com', $entries[1]->host);
         static::assertSame('/app-endpoint', $entries[1]->appEndpoint);
         static::assertSame('https://www.shopware.com/api/service/?page=1&limit=10', $response->getRequestUrl());
-        static::assertSame('/license-sync-endpoint', $entries[1]->licenseSyncEndPoint);
     }
 
     public function testServicesAreFetchedAndCached(): void
@@ -110,10 +123,10 @@ class ClientTest extends TestCase
         ];
 
         $client = new MockHttpClient([
-            new MockResponse((string) json_encode($service)),
+            new MockResponse((string) json_encode($service, \JSON_THROW_ON_ERROR)),
         ]);
 
-        $registryClient = new ServiceRegistryClient('https://www.shopware.com', $client);
+        $registryClient = new ServiceRegistryClient('https://www.shopware.com', 'https://example.com', $client);
 
         $entries1 = $registryClient->getAll();
         static::assertCount(2, $entries1);
@@ -144,11 +157,11 @@ class ClientTest extends TestCase
         ];
 
         $client = new MockHttpClient([
-            new MockResponse((string) json_encode($services1)),
-            new MockResponse((string) json_encode($services2)),
+            new MockResponse((string) json_encode($services1, \JSON_THROW_ON_ERROR)),
+            new MockResponse((string) json_encode($services2, \JSON_THROW_ON_ERROR)),
         ]);
 
-        $registryClient = new ServiceRegistryClient('https://www.shopware.com', $client);
+        $registryClient = new ServiceRegistryClient('https://www.shopware.com', 'https://example.com', $client);
 
         $entries1 = $registryClient->getAll();
         static::assertCount(2, $entries1);
@@ -172,11 +185,11 @@ class ClientTest extends TestCase
         ];
 
         $client = new MockHttpClient([
-            $response1 = new MockResponse((string) json_encode($servicesPage1)),
-            $response2 = new MockResponse((string) json_encode($servicesPage2)),
+            $response1 = new MockResponse((string) json_encode($servicesPage1, \JSON_THROW_ON_ERROR)),
+            $response2 = new MockResponse((string) json_encode($servicesPage2, \JSON_THROW_ON_ERROR)),
         ]);
 
-        $registryClient = new ServiceRegistryClient('https://www.shopware.com/', $client);
+        $registryClient = new ServiceRegistryClient('https://www.shopware.com/', 'https://example.com', $client);
         $entries = $registryClient->getAll();
 
         static::assertCount(2, $entries);
@@ -195,12 +208,12 @@ class ClientTest extends TestCase
     public function testNetworkExceptionReturnsEmptyListOfServices(): void
     {
         $client = new MockHttpClient([
-            function (): void {
+            static function (): void {
                 throw new TransportException('Network error');
             },
         ]);
 
-        $registryClient = new ServiceRegistryClient('https://example.com', $client);
+        $registryClient = new ServiceRegistryClient('https://example.com', 'https://example.com', $client);
 
         static::assertSame([], $registryClient->getAll());
     }
@@ -208,10 +221,10 @@ class ClientTest extends TestCase
     public function testSaveConsentSuccess(): void
     {
         $client = new MockHttpClient([
-            $response = new MockResponse('', ['http_code' => 202]), // Changed from 200 to 202 (HTTP_ACCEPTED)
+            $response = new MockResponse('', ['http_code' => Response::HTTP_ACCEPTED]), // Changed from 200 to 202 (HTTP_ACCEPTED)
         ]);
 
-        $registryClient = new ServiceRegistryClient('https://example.com', $client);
+        $registryClient = new ServiceRegistryClient('https://example.com', 'https://example.com', $client);
 
         $saveConsentRequest = new SaveConsentRequest(
             'service-123',
@@ -231,10 +244,10 @@ class ClientTest extends TestCase
     public function testSaveConsentThrowsExceptionOnFailure(): void
     {
         $client = new MockHttpClient([
-            new MockResponse('', ['http_code' => 500]),
+            new MockResponse('', ['http_code' => Response::HTTP_INTERNAL_SERVER_ERROR]),
         ]);
 
-        $registryClient = new ServiceRegistryClient('https://example.com', $client);
+        $registryClient = new ServiceRegistryClient('https://example.com', 'https://example.com', $client);
 
         $saveConsentRequest = new SaveConsentRequest(
             'service-123',
@@ -251,10 +264,10 @@ class ClientTest extends TestCase
     public function testSaveConsentThrowsExceptionOnNonAcceptedStatusCode(): void
     {
         $client = new MockHttpClient([
-            new MockResponse('', ['http_code' => 200]), // 200 is not HTTP_ACCEPTED (202)
+            new MockResponse('', ['http_code' => Response::HTTP_OK]), // 200 is not HTTP_ACCEPTED (202)
         ]);
 
-        $registryClient = new ServiceRegistryClient('https://example.com', $client);
+        $registryClient = new ServiceRegistryClient('https://example.com', 'https://example.com', $client);
 
         $saveConsentRequest = new SaveConsentRequest(
             'service-123',
@@ -264,18 +277,17 @@ class ClientTest extends TestCase
             'v1.0'
         );
 
-        $this->expectException(ServiceException::class);
-        $this->expectExceptionMessage('Unexpected response status code: 200');
+        $this->expectExceptionObject(ServiceException::consentSaveFailed('Unexpected response status code: 200'));
         $registryClient->saveConsent($saveConsentRequest);
     }
 
     public function testRevokeConsentSuccess(): void
     {
         $client = new MockHttpClient([
-            $response = new MockResponse('', ['http_code' => 202]), // Changed from 200 to 202 (HTTP_ACCEPTED)
+            $response = new MockResponse('', ['http_code' => Response::HTTP_ACCEPTED]), // Changed from 200 to 202 (HTTP_ACCEPTED)
         ]);
 
-        $registryClient = new ServiceRegistryClient('https://example.com', $client);
+        $registryClient = new ServiceRegistryClient('https://example.com', 'https://example.com', $client);
 
         $registryClient->revokeConsent('service-123');
 
@@ -286,25 +298,24 @@ class ClientTest extends TestCase
     public function testRevokeConsentThrowsExceptionOnFailure(): void
     {
         $client = new MockHttpClient([
-            new MockResponse('', ['http_code' => 500]),
+            new MockResponse('', ['http_code' => Response::HTTP_INTERNAL_SERVER_ERROR]),
         ]);
 
-        $registryClient = new ServiceRegistryClient('https://example.com', $client);
+        $registryClient = new ServiceRegistryClient('https://example.com', 'https://example.com', $client);
 
-        $this->expectException(ServiceException::class);
+        $this->expectExceptionObject(ServiceException::consentRevokeFailed('Unexpected response status code: 500'));
         $registryClient->revokeConsent('service-123');
     }
 
     public function testRevokeConsentThrowsExceptionOnNonAcceptedStatusCode(): void
     {
         $client = new MockHttpClient([
-            new MockResponse('', ['http_code' => 200]), // 200 is not HTTP_ACCEPTED (202)
+            new MockResponse('', ['http_code' => Response::HTTP_OK]), // 200 is not HTTP_ACCEPTED (202)
         ]);
 
-        $registryClient = new ServiceRegistryClient('https://example.com', $client);
+        $registryClient = new ServiceRegistryClient('https://example.com', 'https://example.com', $client);
 
-        $this->expectException(ServiceException::class);
-        $this->expectExceptionMessage('Unexpected response status code: 200');
+        $this->expectExceptionObject(ServiceException::consentRevokeFailed('Unexpected response status code: 200'));
         $registryClient->revokeConsent('service-123');
     }
 
@@ -315,16 +326,16 @@ class ClientTest extends TestCase
                 ['name' => 'MyCoolService1', 'host' => 'https://coolservice1.com', 'label' => 'My Cool Service 1', 'app-endpoint' => '/app-endpoint'],
             ],
         ];
-        $servicePayload = (string) json_encode($service);
+        $servicePayload = (string) json_encode($service, \JSON_THROW_ON_ERROR);
         $expectedUrl = 'https://www.shopware.com/api/service/?page=1&limit=10';
         $clientWithSlash = new MockHttpClient([$responseWithSlash = new MockResponse($servicePayload)]);
-        $registryClientWithSlash = new ServiceRegistryClient('https://www.shopware.com/', $clientWithSlash);
+        $registryClientWithSlash = new ServiceRegistryClient('https://www.shopware.com/', 'https://example.com', $clientWithSlash);
         $entriesWithSlash = $registryClientWithSlash->getAll();
         static::assertCount(1, $entriesWithSlash);
         static::assertSame($expectedUrl, $responseWithSlash->getRequestUrl());
 
         $clientWithoutSlash = new MockHttpClient([$responseWithoutSlash = new MockResponse($servicePayload)]);
-        $registryClientWithoutSlash = new ServiceRegistryClient('https://www.shopware.com', $clientWithoutSlash);
+        $registryClientWithoutSlash = new ServiceRegistryClient('https://www.shopware.com', 'https://example.com', $clientWithoutSlash);
         $entriesWithoutSlash = $registryClientWithoutSlash->getAll();
         static::assertCount(1, $entriesWithoutSlash);
         static::assertSame($expectedUrl, $responseWithoutSlash->getRequestUrl());
@@ -341,7 +352,7 @@ class ClientTest extends TestCase
             ]),
         ]);
 
-        $registryClient = new ServiceRegistryClient('https://example.com', $client);
+        $registryClient = new ServiceRegistryClient('https://example.com', 'https://example.com', $client);
 
         $collected = '';
         foreach ($registryClient->fetchServiceZip($zipUrl) as $chunk) {
@@ -358,10 +369,10 @@ class ClientTest extends TestCase
         $zipUrl = 'https://files.example.com/missing.zip';
 
         $client = new MockHttpClient([
-            new MockResponse('', ['http_code' => 404]),
+            new MockResponse('', ['http_code' => Response::HTTP_NOT_FOUND]),
         ]);
 
-        $registryClient = new ServiceRegistryClient('https://example.com', $client);
+        $registryClient = new ServiceRegistryClient('https://example.com', 'https://example.com', $client);
 
         $this->expectException(ServiceException::class);
         // Force execution so checkResponse() runs and throws
@@ -370,7 +381,7 @@ class ClientTest extends TestCase
 
     public static function nonZipContentTypeProvider(): \Generator
     {
-        yield 'json' => ['application/json', json_encode(['ok' => true])];
+        yield 'json' => ['application/json', json_encode(['ok' => true], \JSON_THROW_ON_ERROR)];
         yield 'html' => ['text/html; charset=UTF-8', '<html><body>Not a zip</body></html>'];
     }
 
@@ -381,14 +392,33 @@ class ClientTest extends TestCase
 
         $client = new MockHttpClient([
             new MockResponse($body, [
-                'http_code' => 200,
+                'http_code' => Response::HTTP_OK,
                 'response_headers' => ['Content-Type: ' . $contentType],
             ]),
         ]);
 
-        $registryClient = new ServiceRegistryClient('https://example.com', $client);
+        $registryClient = new ServiceRegistryClient('https://example.com', 'https://example.com', $client);
         $this->expectException(ServiceException::class);
         // Force execution so checkResponse() runs and throws
         \iterator_to_array($registryClient->fetchServiceZip($zipUrl));
+    }
+
+    public function testRefererHeaderIsAddedToServiceListRequest(): void
+    {
+        $service = [
+            'services' => [],
+        ];
+
+        $client = new MockHttpClient([
+            $response = new MockResponse((string) json_encode($service, \JSON_THROW_ON_ERROR)),
+        ]);
+
+        $registryClient = new ServiceRegistryClient('https://www.shopware.com', 'https://example.com', $client);
+
+        $registryClient->getAll();
+
+        $requestOptions = $response->getRequestOptions();
+        static::assertArrayHasKey('headers', $requestOptions);
+        static::assertContains('Referer: https://example.com', $requestOptions['headers']);
     }
 }

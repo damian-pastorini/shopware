@@ -4,6 +4,7 @@ namespace Shopware\Elasticsearch\Framework\Indexing;
 
 use Doctrine\DBAL\Connection;
 use OpenSearch\Client;
+use Psr\Clock\ClockInterface;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\Dbal\Common\IteratorFactory;
@@ -23,8 +24,8 @@ use Symfony\Component\Messenger\Attribute\AsMessageHandler;
  *
  * @final
  */
-#[AsMessageHandler]
 #[Package('framework')]
+#[AsMessageHandler]
 class ElasticsearchIndexer
 {
     /**
@@ -39,7 +40,9 @@ class ElasticsearchIndexer
         private readonly Client $client,
         private readonly LoggerInterface $logger,
         private readonly EventDispatcherInterface $eventDispatcher,
-        private readonly int $indexingBatchSize
+        private readonly int $indexingBatchSize,
+        private readonly ClockInterface $clock,
+        private readonly bool $refreshAfterBulk = false,
     ) {
     }
 
@@ -87,6 +90,18 @@ class ElasticsearchIndexer
     }
 
     /**
+     * Creates empty indices and aliases without populating documents.
+     */
+    public function createIndices(): void
+    {
+        if (!$this->helper->allowIndexing()) {
+            return;
+        }
+
+        $this->createIndex(\DateTime::createFromImmutable($this->clock->now()));
+    }
+
+    /**
      * @param array<string> $ids
      */
     private function generateMessage(EntityDefinition $definition, array $ids): ElasticsearchIndexingMessage
@@ -117,7 +132,7 @@ class ElasticsearchIndexer
 
         $ids = $event->iterator->fetch();
 
-        if (empty($ids)) {
+        if ($ids === []) {
             if (!$offset->hasNextDefinition()) {
                 return null;
             }
@@ -148,7 +163,7 @@ class ElasticsearchIndexer
     {
         $this->connection->executeStatement('DELETE FROM elasticsearch_index_task');
 
-        $timestamp = new \DateTime();
+        $timestamp = \DateTime::createFromImmutable($this->clock->now());
 
         $this->createIndex($timestamp);
 
@@ -253,7 +268,7 @@ class ElasticsearchIndexer
 
         $data = $definition->fetch(Uuid::fromHexToBytesList($ids), $context);
 
-        $toRemove = array_filter($ids, fn (string $id) => !isset($data[$id]));
+        $toRemove = array_filter($ids, static fn (string $id) => !isset($data[$id]));
 
         $documents = [];
 
@@ -274,6 +289,10 @@ class ElasticsearchIndexer
             'index' => $index,
             'body' => $documents,
         ];
+
+        if ($this->refreshAfterBulk) {
+            $arguments['refresh'] = true;
+        }
 
         $result = $this->client->bulk($arguments);
 
@@ -301,7 +320,7 @@ class ElasticsearchIndexer
      */
     private function handleEntities(array $entities = []): iterable
     {
-        if (empty($entities)) {
+        if ($entities === []) {
             return $this->registry->getDefinitionNames();
         }
 
@@ -312,7 +331,7 @@ class ElasticsearchIndexer
         $validEntities = array_intersect($entities, $registeredEntities);
         $unregisteredEntities = array_diff($entities, $registeredEntities);
 
-        if (!empty($unregisteredEntities)) {
+        if ($unregisteredEntities !== []) {
             $unregisteredEntityList = implode(', ', $unregisteredEntities);
 
             $exception = ElasticsearchException::definitionNotFound($unregisteredEntityList);

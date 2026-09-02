@@ -107,7 +107,10 @@ class ProductSubscriber implements EventSubscriberInterface
             $assigns = [];
 
             if (($properties = $product->get('properties')) !== null) {
-                $assigns['sortedProperties'] = $this->propertyGroupSorter->sort($properties);
+                $assigns['sortedProperties'] = $this->propertyGroupSorter->sortUsingLocaleCode(
+                    $properties,
+                    $event->getSalesChannelContext()->getLanguageInfo()->localeCode,
+                );
             }
 
             $assigns['calculatedMaxPurchase'] = $this->maxPurchaseCalculator->calculate($product, $event->getSalesChannelContext());
@@ -168,7 +171,7 @@ class ProductSubscriber implements EventSubscriberInterface
     {
         $deletedProductIds = $event->getIds(ProductDefinition::ENTITY_NAME);
 
-        if (empty($deletedProductIds)) {
+        if ($deletedProductIds === []) {
             return;
         }
 
@@ -185,7 +188,7 @@ class ProductSubscriber implements EventSubscriberInterface
             ['ids' => ArrayParameterType::BINARY]
         );
 
-        if (empty($parentIds)) {
+        if ($parentIds === []) {
             return;
         }
 
@@ -201,22 +204,22 @@ class ProductSubscriber implements EventSubscriberInterface
      */
     private function cleanupConfiguratorSettings(array $parentIds, string $versionBytes): void
     {
-        if (empty($parentIds)) {
+        if ($parentIds === []) {
             return;
         }
 
         // Clean up configurator settings for parents that no longer have variants using those options
         $this->connection->executeStatement(
-            'DELETE FROM product_configurator_setting pcs
-             WHERE pcs.product_id IN (:parentIds)
-             AND pcs.product_version_id = :versionId
+            'DELETE FROM product_configurator_setting
+             WHERE product_configurator_setting.product_id IN (:parentIds)
+             AND product_configurator_setting.product_version_id = :versionId
              AND NOT EXISTS (
                  SELECT 1
                  FROM product_option po
                  INNER JOIN product p ON p.id = po.product_id AND p.version_id = po.product_version_id
-                 WHERE p.parent_id = pcs.product_id
+                 WHERE p.parent_id = product_configurator_setting.product_id
                      AND p.version_id = :versionId
-                     AND po.property_group_option_id = pcs.property_group_option_id
+                     AND po.property_group_option_id = product_configurator_setting.property_group_option_id
                      AND po.product_version_id = :versionId
              )',
             [
@@ -271,7 +274,7 @@ class ProductSubscriber implements EventSubscriberInterface
             $assigns[$unit] = $convertedUnit->value;
         }
 
-        if (!empty($assigns)) {
+        if ($assigns !== []) {
             $product->assign($assigns);
         }
     }

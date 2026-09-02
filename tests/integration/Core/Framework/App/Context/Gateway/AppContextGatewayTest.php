@@ -3,11 +3,9 @@
 namespace Shopware\Tests\Integration\Core\Framework\App\Context\Gateway;
 
 use GuzzleHttp\Psr7\Response;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Shopware\Core\Framework\App\AppCollection;
 use Shopware\Core\Framework\App\AppEntity;
-use Shopware\Core\Framework\App\Context\Gateway\AppContextGateway;
 use Shopware\Core\Framework\App\Hmac\RequestSigner;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
@@ -28,8 +26,7 @@ use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 /**
  * @internal
  */
-#[CoversClass(AppContextGateway::class)]
-#[Package('checkout')]
+#[Package('framework')]
 class AppContextGatewayTest extends TestCase
 {
     use AppSystemTestBehaviour;
@@ -205,7 +202,7 @@ class AppContextGatewayTest extends TestCase
     /**
      * @param array<array{command: string, payload: array<string,mixed>}> $commands
      */
-    private function executeCommands(array $commands): string
+    private function executeCommands(array $commands, bool $expectContextToken = true): string
     {
         $this->loadAppsFromDir(__DIR__ . '/../_fixtures/testGateway');
 
@@ -228,12 +225,15 @@ class AppContextGatewayTest extends TestCase
         $response = $this->browser->getResponse();
 
         static::assertSame(200, $response->getStatusCode());
-        static::assertTrue($response->headers->has(PlatformRequest::HEADER_CONTEXT_TOKEN));
+        static::assertSame($expectContextToken, $response->headers->has(PlatformRequest::HEADER_CONTEXT_TOKEN));
 
         $token = $response->headers->get(PlatformRequest::HEADER_CONTEXT_TOKEN);
 
-        static::assertNotNull($token);
+        if (!$expectContextToken) {
+            return '';
+        }
 
+        static::assertNotNull($token);
         $this->browser->setServerParameter('HTTP_' . PlatformRequest::HEADER_CONTEXT_TOKEN, $token);
 
         return $token;

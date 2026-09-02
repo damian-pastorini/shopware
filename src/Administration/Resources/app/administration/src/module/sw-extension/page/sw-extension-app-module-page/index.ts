@@ -95,6 +95,10 @@ export default Shopware.Component.wrapComponentConfig({
             return !this.appDefinition || !this.moduleDefinition;
         },
 
+        appsLoaded(): boolean {
+            return Shopware.Store.get('shopwareApps').appsLoaded;
+        },
+
         heading(): string | null {
             if (!this.appDefinition) {
                 return null;
@@ -132,7 +136,7 @@ export default Shopware.Component.wrapComponentConfig({
             try {
                 const url = new URL(this.entryPoint);
                 return url.origin;
-            } catch (e) {
+            } catch (_e) {
                 return null;
             }
         },

@@ -15,8 +15,8 @@ use Twig\Environment;
 /**
  * @internal
  */
-#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [ApiRouteScope::ID]])]
 #[Package('checkout')]
+#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [ApiRouteScope::ID]])]
 class CustomSnippetFormatController
 {
     /**
@@ -43,8 +43,9 @@ class CustomSnippetFormatController
     #[Route(path: '/api/_action/custom-snippet/render', name: 'api.action.custom-snippet.render', methods: ['POST'])]
     public function render(Request $request): JsonResponse
     {
-        $format = $request->get('format') ?? [];
-        $data = $request->get('data') ?? [];
+        $format = $request->request->all()['format'] ?? [];
+        /** @var array<mixed> $data */
+        $data = $request->request->all()['data'] ?? [];
         $parameters = array_merge_recursive(['format' => $format], $data);
 
         return new JsonResponse([

@@ -1,3 +1,5 @@
+/* eslint-disable sw-test-rules/test-file-max-lines-warning */
+
 /**
  * @sw-package buyers-experience
  */
@@ -53,6 +55,11 @@ async function createWrapper(propsOverride = {}, repositoryFactoryOverride = {})
         },
         global: {
             provide: {
+                mediaPresignedUploadService: {
+                    prepareUpload: jest.fn(),
+                    uploadToPresignedUrl: jest.fn(),
+                    finalizeUpload: jest.fn(),
+                },
                 repositoryFactory: repositoryFactoryMock,
                 searchRankingService: {
                     isValidTerm: (term) => {
@@ -310,10 +317,26 @@ describe('src/module/sw-product/component/sw-product-variants/sw-product-variant
         expect(deleteVariantsButton.exists()).toBeFalsy();
     });
 
-    it('should add the downloads column when the product state is equal "is-download"', async () => {
+    it('should keep the current inline edit row when another variant is double clicked before saving', async () => {
+        global.activeAclRoles = ['product.editor'];
+
+        const wrapper = await createWrapper();
+        await flushPromises();
+
+        const variantGrid = wrapper.vm.$refs.variantGrid;
+
+        variantGrid.onDbClickCell(wrapper.vm.variants[0]);
+        expect(variantGrid.currentInlineEditId).toBe(1);
+
+        variantGrid.onDbClickCell(wrapper.vm.variants[1]);
+        expect(variantGrid.currentInlineEditId).toBe(1);
+    });
+
+    it('should add the downloads column when the product type is equal "digital"', async () => {
         const wrapper = await createWrapper(
             {
                 productStates: ['is-download'],
+                productType: 'digital',
             },
             {
                 create: (entity) => {
@@ -358,7 +381,7 @@ describe('src/module/sw-product/component/sw-product-variants/sw-product-variant
         };
 
         const wrapper = await createWrapper(
-            { productStates: ['is-download'] },
+            { productStates: ['is-download'], productType: 'digital' },
             {
                 create: () => ({
                     search: () => Promise.resolve([item]),
@@ -403,7 +426,7 @@ describe('src/module/sw-product/component/sw-product-variants/sw-product-variant
         };
 
         const wrapper = await createWrapper(
-            { productStates: ['is-download'] },
+            { productStates: ['is-download'], productType: 'digital' },
             {
                 create: () => ({
                     search: () => Promise.resolve([item]),
@@ -434,7 +457,7 @@ describe('src/module/sw-product/component/sw-product-variants/sw-product-variant
             $refs: {
                 variantGrid: {
                     selection: {
-                        foo: { states: ['is-download'] },
+                        foo: { states: ['is-download'], type: 'digital' },
                     },
                 },
             },
@@ -499,6 +522,37 @@ describe('src/module/sw-product/component/sw-product-variants/sw-product-variant
         expect(criteria.queries[2].score).toBe(5000);
     });
 
+    it('buildSearchQuery ignores empty terms from leading or repeated whitespace', async () => {
+        const criteria = new Criteria();
+        const wrapper = await createWrapper();
+
+        // Regression test for issue #16838: a leading space produced an empty
+        // term, which built a `contains` filter with an empty value and made the
+        // API reject the whole query with FRAMEWORK__INVALID_FILTER_QUERY.
+        wrapper.vm.term = ' red';
+        wrapper.vm.buildSearchQuery(criteria);
+
+        // Only the non-empty term "red" yields option queries (+1 productNumber query).
+        expect(criteria.queries).toHaveLength(3);
+        criteria.queries.forEach((query) => {
+            expect(query.query.value).not.toBe('');
+        });
+        expect(criteria.queries[0].query.value).toBe('red');
+        expect(criteria.queries[1].query.value).toBe('red');
+        // The productNumber query uses the trimmed term, not the raw " red".
+        expect(criteria.queries[2].query.value).toBe('red');
+    });
+
+    it('buildSearchQuery returns an unmodified criteria for a whitespace-only term', async () => {
+        const criteria = new Criteria();
+        const wrapper = await createWrapper();
+
+        wrapper.vm.term = '   ';
+        wrapper.vm.buildSearchQuery(criteria);
+
+        expect(criteria.queries).toHaveLength(0);
+    });
+
     it('should update variant listing config of product when deleting variant', async () => {
         global.activeAclRoles = ['product.deleter'];
 
@@ -524,7 +578,10 @@ describe('src/module/sw-product/component/sw-product-variants/sw-product-variant
         const deleteModal = wrapper.find('.sw-product-variants-overview__delete-modal');
         expect(deleteModal.exists()).toBe(true);
 
-        await wrapper.findByText('button', 'sw-product.variations.generatedListDeleteModalButtonDelete').trigger('click');
+        await deleteModal
+            .findAll('button')
+            .find((button) => button.text().trim() === 'global.default.delete')
+            .trigger('click');
         await flushPromises();
 
         expect(wrapper.vm.productRepository.save).toHaveBeenCalledTimes(1);
@@ -616,5 +673,39 @@ describe('src/module/sw-product/component/sw-product-variants/sw-product-variant
 
         expect(newProductMedia.media).toEqual(mediaItemToUnInherit);
         expect(newProductMedia._isNew).toBe(true);
+    });
+
+    it('should handle error when deleting variant fails', async () => {
+        global.activeAclRoles = ['product.deleter'];
+
+        const syncDeletedMock = jest.fn().mockRejectedValueOnce(new Error('Delete failed'));
+
+        const wrapper = await createWrapper(
+            {},
+            {
+                create: jest.fn(() => ({
+                    search: () => Promise.resolve([]),
+                    save: jest.fn(() => Promise.resolve()),
+                    get: () => Promise.resolve({}),
+                    syncDeleted: syncDeletedMock,
+                })),
+            },
+        );
+        await flushPromises();
+
+        const createNotificationErrorSpy = jest.spyOn(wrapper.vm, 'createNotificationError');
+
+        wrapper.vm.toBeDeletedVariantIds = [{ id: 'variant-1' }];
+        wrapper.vm.showDeleteModal = true;
+        wrapper.vm.modalLoading = false;
+
+        await wrapper.vm.onConfirmDelete();
+        await flushPromises();
+
+        expect(wrapper.vm.modalLoading).toBe(false);
+        expect(wrapper.vm.toBeDeletedVariantIds).toEqual([]);
+        expect(createNotificationErrorSpy).toHaveBeenCalledWith({
+            message: 'sw-product.variations.generatedListMessageDeleteError',
+        });
     });
 });

@@ -4,7 +4,6 @@ namespace Shopware\Core\Framework\Demodata\Command;
 
 use Bezhanov\Faker\Provider\Commerce;
 use Faker\Factory;
-use Maltyxx\ImagesGenerator\ImagesGeneratorProvider;
 use Shopware\Core\Checkout\Customer\CustomerDefinition;
 use Shopware\Core\Checkout\Order\OrderDefinition;
 use Shopware\Core\Checkout\Promotion\PromotionDefinition;
@@ -13,13 +12,13 @@ use Shopware\Core\Content\Flow\FlowDefinition;
 use Shopware\Core\Content\MailTemplate\Aggregate\MailHeaderFooter\MailHeaderFooterDefinition;
 use Shopware\Core\Content\MailTemplate\MailTemplateDefinition;
 use Shopware\Core\Content\Media\MediaDefinition;
+use Shopware\Core\Content\Newsletter\Aggregate\NewsletterRecipient\NewsletterRecipientDefinition;
 use Shopware\Core\Content\Product\Aggregate\ProductManufacturer\ProductManufacturerDefinition;
 use Shopware\Core\Content\Product\Aggregate\ProductReview\ProductReviewDefinition;
 use Shopware\Core\Content\Product\ProductDefinition;
 use Shopware\Core\Content\ProductStream\ProductStreamDefinition;
 use Shopware\Core\Content\Property\PropertyGroupDefinition;
 use Shopware\Core\Content\Rule\RuleDefinition;
-use Shopware\Core\Framework\Adapter\Console\ShopwareStyle;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\Demodata\DemodataRequest;
 use Shopware\Core\Framework\Demodata\DemodataService;
@@ -34,16 +33,17 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 
 /**
  * @internal
  */
+#[Package('fundamentals@after-sales')]
 #[AsCommand(
     name: 'framework:demodata',
     description: 'Generates demo data',
 )]
-#[Package('fundamentals@after-sales')]
 class DemodataCommand extends Command
 {
     /**
@@ -52,12 +52,13 @@ class DemodataCommand extends Command
     private array $defaults = [];
 
     /**
-     * @internal
+     * @param list<class-string> $requiredClasses
      */
     public function __construct(
         private readonly DemodataService $demodataService,
         private readonly EventDispatcherInterface $eventDispatcher,
-        private readonly string $kernelEnv
+        private readonly string $kernelEnv,
+        private readonly array $requiredClasses = [Factory::class, Commerce::class],
     ) {
         parent::__construct();
     }
@@ -80,16 +81,18 @@ class DemodataCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $this->ensureAllDependenciesArePresent();
-
         if ($this->kernelEnv !== 'prod') {
             $output->writeln('Demo data command requires the app environment set to production to run. Execute it with: `APP_ENV=prod bin/console framework:demodata`');
 
             return self::INVALID;
         }
 
-        $io = new ShopwareStyle($input, $output);
+        $io = new SymfonyStyle($input, $output);
         $io->title('Demodata Generator');
+
+        if (!$this->ensureAllDependenciesArePresent($io)) {
+            return self::FAILURE;
+        }
 
         $context = Context::createCLIContext();
 
@@ -122,6 +125,7 @@ class DemodataCommand extends Command
         $request->add(MailTemplateDefinition::class, $this->getCount($input, 'mail-template'));
         $request->add(MailHeaderFooterDefinition::class, $this->getCount($input, 'mail-header-footer'));
         $request->add(SalesChannelDomainDefinition::class, $this->getCount($input, 'sales-channel-domain'));
+        $request->add(NewsletterRecipientDefinition::class, $this->getCount($input, 'newsletter-recipients'));
 
         $this->eventDispatcher->dispatch(new DemodataRequestCreatedEvent($request, $context, $input));
 
@@ -131,6 +135,8 @@ class DemodataCommand extends Command
             ['Entity', 'Items', 'Time'],
             $demoContext->getTimings()
         );
+
+        $io->info('Run "bin/console dal:refresh:index" to refresh all indices after generating demo data.');
 
         return self::SUCCESS;
     }
@@ -164,17 +170,16 @@ class DemodataCommand extends Command
         return $this->defaults[$name] ?? 0;
     }
 
-    /**
-     * @codeCoverageIgnore
-     */
-    private function ensureAllDependenciesArePresent(): void
+    private function ensureAllDependenciesArePresent(SymfonyStyle $io): bool
     {
-        $classes = [Factory::class, Commerce::class, ImagesGeneratorProvider::class];
-
-        foreach ($classes as $class) {
+        foreach ($this->requiredClasses as $class) {
             if (!class_exists($class)) {
-                throw new \RuntimeException('Please install composer package "shopware/dev-tools" to use the demo-data command.');
+                $io->error('Please install composer package "shopware/dev-tools" to use the demo-data command.');
+
+                return false;
             }
         }
+
+        return true;
     }
 }

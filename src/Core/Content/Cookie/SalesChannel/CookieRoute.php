@@ -20,8 +20,8 @@ use Symfony\Component\Routing\Attribute\Route;
 /**
  * @experimental stableVersion:v6.8.0 feature:COOKIE_GROUPS_STORE_API
  */
+#[Package('discovery')]
 #[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [StoreApiRouteScope::ID]])]
-#[Package('framework')]
 class CookieRoute extends AbstractCookieRoute
 {
     /**
@@ -44,7 +44,7 @@ class CookieRoute extends AbstractCookieRoute
         $hash = $this->generateCookieConfigurationHash($cookieGroups);
         $this->setCookieConfigHashValue($cookieGroups, $hash);
 
-        return new CookieRouteResponse($cookieGroups, $hash);
+        return new CookieRouteResponse($cookieGroups, $hash, $salesChannelContext->getLanguageId());
     }
 
     /**

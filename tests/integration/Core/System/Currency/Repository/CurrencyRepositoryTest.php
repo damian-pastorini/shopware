@@ -11,6 +11,7 @@ use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Term\EntityScoreQueryBuilder;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Term\SearchTermInterpreter;
 use Shopware\Core\Framework\DataAbstractionLayer\Write\Validation\RestrictDeleteViolationException;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Test\TestCaseBase\DatabaseTransactionBehaviour;
 use Shopware\Core\Framework\Test\TestCaseBase\KernelTestBehaviour;
 use Shopware\Core\Framework\Uuid\Uuid;
@@ -20,6 +21,7 @@ use Shopware\Core\System\Currency\CurrencyDefinition;
 /**
  * @internal
  */
+#[Package('fundamentals@framework')]
 class CurrencyRepositoryTest extends TestCase
 {
     use DatabaseTransactionBehaviour;
@@ -70,7 +72,7 @@ class CurrencyRepositoryTest extends TestCase
         $criteria = new Criteria();
 
         $builder = static::getContainer()->get(EntityScoreQueryBuilder::class);
-        $pattern = static::getContainer()->get(SearchTermInterpreter::class)->interpret('match', Context::createDefaultContext());
+        $pattern = static::getContainer()->get(SearchTermInterpreter::class)->interpret('match');
         $context = Context::createDefaultContext();
         $queries = $builder->buildScoreQueries(
             $pattern,

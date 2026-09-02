@@ -4,11 +4,13 @@ namespace Shopware\Tests\Unit\Core\Framework\Script\Service;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Script\Facade\ArrayFacade;
 
 /**
  * @internal
  */
+#[Package('framework')]
 #[CoversClass(ArrayFacade::class)]
 class ArrayFacadeTest extends TestCase
 {
@@ -71,5 +73,22 @@ class ArrayFacadeTest extends TestCase
         $a->replace(['foo' => 'baz']);
 
         static::assertSame('baz', $a['foo']);
+    }
+
+    public function testReset(): void
+    {
+        $array = [1, 2, 3, 'foo' => 'bar'];
+        $facade = new ArrayFacade($array);
+
+        static::assertCount(4, $facade);
+        static::assertTrue($facade->offsetExists(0));
+        static::assertTrue($facade->offsetExists('foo'));
+
+        $facade->reset();
+
+        static::assertCount(0, $facade);
+        static::assertFalse($facade->offsetExists(0));
+        static::assertFalse($facade->offsetExists('foo'));
+        static::assertSame([], $facade->all());
     }
 }

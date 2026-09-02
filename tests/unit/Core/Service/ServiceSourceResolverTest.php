@@ -4,6 +4,7 @@ namespace Shopware\Tests\Unit\Core\Service;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\MockObject\MockObject;
+use PHPUnit\Framework\MockObject\Stub;
 use PHPUnit\Framework\TestCase;
 use Shopware\Core\Framework\App\AppEntity;
 use Shopware\Core\Framework\App\AppException;
@@ -12,6 +13,7 @@ use Shopware\Core\Framework\App\Exception\AppArchiveValidationFailure;
 use Shopware\Core\Framework\App\Manifest\Manifest;
 use Shopware\Core\Framework\App\Manifest\Xml\Meta\Metadata;
 use Shopware\Core\Framework\App\Source\TemporaryDirectoryFactory;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\Service\AppInfo;
 use Shopware\Core\Service\ServiceException;
@@ -23,16 +25,17 @@ use Symfony\Contracts\HttpClient\ChunkInterface;
 /**
  * @internal
  */
+#[Package('framework')]
 #[CoversClass(ServiceSourceResolver::class)]
 class ServiceSourceResolverTest extends TestCase
 {
     public function testName(): void
     {
         $source = new ServiceSourceResolver(
-            $this->createMock(Client::class),
+            static::createStub(Client::class),
             new TemporaryDirectoryFactory(),
-            $this->createMock(AppExtractor::class),
-            $this->createMock(Filesystem::class)
+            static::createStub(AppExtractor::class),
+            static::createStub(Filesystem::class)
         );
         static::assertSame('service', $source->name());
     }
@@ -44,10 +47,10 @@ class ServiceSourceResolverTest extends TestCase
         $app->setSourceType('service');
 
         $source = new ServiceSourceResolver(
-            $this->createMock(Client::class),
+            static::createStub(Client::class),
             new TemporaryDirectoryFactory(),
-            $this->createMock(AppExtractor::class),
-            $this->createMock(Filesystem::class)
+            static::createStub(AppExtractor::class),
+            static::createStub(Filesystem::class)
         );
 
         static::assertTrue($source->supports($app));
@@ -59,7 +62,7 @@ class ServiceSourceResolverTest extends TestCase
 
     public function testSupportSelfManagedManifestsWithHttpUrls(): void
     {
-        $manifest = static::createMock(Manifest::class);
+        $manifest = static::createStub(Manifest::class);
         $manifest->method('getPath')->willReturn('https://example.com');
 
         $metadata = Metadata::fromArray([
@@ -76,10 +79,10 @@ class ServiceSourceResolverTest extends TestCase
         $manifest->method('getMetadata')->willReturn($metadata);
 
         $source = new ServiceSourceResolver(
-            $this->createMock(Client::class),
+            static::createStub(Client::class),
             new TemporaryDirectoryFactory(),
-            $this->createMock(AppExtractor::class),
-            $this->createMock(Filesystem::class)
+            static::createStub(AppExtractor::class),
+            static::createStub(Filesystem::class)
         );
 
         static::assertTrue($source->supports($manifest));
@@ -88,7 +91,7 @@ class ServiceSourceResolverTest extends TestCase
     public function testFilesystemForVersion(): void
     {
         $client = $this->createMock(Client::class);
-        $temporaryDirectoryFactory = $this->createMock(TemporaryDirectoryFactory::class);
+        $temporaryDirectoryFactory = static::createStub(TemporaryDirectoryFactory::class);
         $appExtractor = $this->createMock(AppExtractor::class);
         $filesystem = $this->createMock(Filesystem::class);
 
@@ -110,6 +113,7 @@ class ServiceSourceResolverTest extends TestCase
             'abc123',
             '1.0.0-abc123',
             'https://example.com/app.zip',
+            ['service_consent'],
             'sha256',
             '6.6.0.0'
         );
@@ -154,7 +158,7 @@ class ServiceSourceResolverTest extends TestCase
     public function testAppIsDownloadedIfItDoesNotExistOnFilesystem(): void
     {
         $client = $this->createMock(Client::class);
-        $temporaryDirectoryFactory = $this->createMock(TemporaryDirectoryFactory::class);
+        $temporaryDirectoryFactory = static::createStub(TemporaryDirectoryFactory::class);
         $appExtractor = $this->createMock(AppExtractor::class);
         $filesystem = $this->createMock(Filesystem::class);
 
@@ -186,6 +190,7 @@ class ServiceSourceResolverTest extends TestCase
             'zip-url' => 'https://example.com/service.zip',
             'hash-algorithm' => 'sha256',
             'min-shop-supported-version' => '6.6.0.0',
+            'requirements' => ['service_consent'],
         ]);
 
         $result = $source->filesystem($app);
@@ -196,7 +201,7 @@ class ServiceSourceResolverTest extends TestCase
     public function testFilesystemWithManifest(): void
     {
         $client = $this->createMock(Client::class);
-        $temporaryDirectoryFactory = $this->createMock(TemporaryDirectoryFactory::class);
+        $temporaryDirectoryFactory = static::createStub(TemporaryDirectoryFactory::class);
         $appExtractor = $this->createMock(AppExtractor::class);
         $filesystem = $this->createMock(Filesystem::class);
 
@@ -228,6 +233,7 @@ class ServiceSourceResolverTest extends TestCase
                 'zip-url' => 'https://example.com/manifest.zip',
                 'hash-algorithm' => 'sha512',
                 'min-shop-supported-version' => '6.7.0.0',
+                'requirements' => ['service_consent'],
             ]);
 
         $this->successfulDownloadVersionCommonExpectations(
@@ -250,12 +256,11 @@ class ServiceSourceResolverTest extends TestCase
     public function testDownloadVersionThrowsExceptionOnServiceError(): void
     {
         $client = $this->createMock(Client::class);
-        $temporaryDirectoryFactory = $this->createMock(TemporaryDirectoryFactory::class);
-        $appExtractor = $this->createMock(AppExtractor::class);
+        $temporaryDirectoryFactory = static::createStub(TemporaryDirectoryFactory::class);
+        $appExtractor = static::createStub(AppExtractor::class);
         $filesystem = $this->createMock(Filesystem::class);
 
-        $temporaryDirectoryFactory->expects($this->any())
-            ->method('path')
+        $temporaryDirectoryFactory->method('path')
             ->willReturn('/tmp/test');
 
         $filesystem->expects($this->once())
@@ -287,10 +292,10 @@ class ServiceSourceResolverTest extends TestCase
             'zip-url' => 'https://example.com/failing.zip',
             'hash-algorithm' => 'sha256',
             'min-shop-supported-version' => '6.6.0.0',
+            'requirements' => ['service_consent'],
         ]);
 
-        $this->expectException(AppException::class);
-        $this->expectExceptionMessage('Cannot mount a filesystem for App "FailingService"');
+        $this->expectExceptionObject(AppException::cannotMountAppFilesystem('FailingService', new AppArchiveValidationFailure(400, 'INVALID', 'Error writing app zip to file "/tmp/test/FailingService"')));
 
         $source->filesystem($app);
     }
@@ -298,12 +303,11 @@ class ServiceSourceResolverTest extends TestCase
     public function testDownloadVersionThrowsExceptionOnExtractorError(): void
     {
         $client = $this->createMock(Client::class);
-        $temporaryDirectoryFactory = $this->createMock(TemporaryDirectoryFactory::class);
+        $temporaryDirectoryFactory = static::createStub(TemporaryDirectoryFactory::class);
         $appExtractor = $this->createMock(AppExtractor::class);
         $filesystem = $this->createMock(Filesystem::class);
 
-        $temporaryDirectoryFactory->expects($this->any())
-            ->method('path')
+        $temporaryDirectoryFactory->method('path')
             ->willReturn('/tmp/test');
 
         $filesystem->expects($this->once())
@@ -343,10 +347,10 @@ class ServiceSourceResolverTest extends TestCase
             'zip-url' => 'https://example.com/failing.zip',
             'hash-algorithm' => 'sha256',
             'min-shop-supported-version' => '6.6.0.0',
+            'requirements' => ['service_consent'],
         ]);
 
-        $this->expectException(AppException::class);
-        $this->expectExceptionMessage('Cannot mount a filesystem for App "FailingExtraction"');
+        $this->expectExceptionObject(AppException::cannotMountAppFilesystem('FailingExtraction', new AppArchiveValidationFailure(400, 'INVALID', 'Invalid archive')));
 
         $source->filesystem($app);
     }
@@ -354,12 +358,11 @@ class ServiceSourceResolverTest extends TestCase
     public function testDownloadVersionThrowsExceptionOnFileWriteError(): void
     {
         $client = $this->createMock(Client::class);
-        $temporaryDirectoryFactory = $this->createMock(TemporaryDirectoryFactory::class);
-        $appExtractor = $this->createMock(AppExtractor::class);
+        $temporaryDirectoryFactory = static::createStub(TemporaryDirectoryFactory::class);
+        $appExtractor = static::createStub(AppExtractor::class);
         $filesystem = $this->createMock(Filesystem::class);
 
-        $temporaryDirectoryFactory->expects($this->any())
-            ->method('path')
+        $temporaryDirectoryFactory->method('path')
             ->willReturn('/tmp/test');
 
         $filesystem->expects($this->once())
@@ -396,6 +399,7 @@ class ServiceSourceResolverTest extends TestCase
             'zip-url' => 'https://example.com/failing.zip',
             'hash-algorithm' => 'sha256',
             'min-shop-supported-version' => '6.6.0.0',
+            'requirements' => ['service_consent'],
         ]);
 
         static::expectExceptionObject(AppException::cannotMountAppFilesystem('WriteFailService', ServiceException::cannotWriteAppToDestination('/tmp/test/WriteFailService', $underlyingException)));
@@ -409,15 +413,14 @@ class ServiceSourceResolverTest extends TestCase
      */
     private function successfulDownloadVersionCommonExpectations(
         MockObject $client,
-        MockObject $temporaryDirectoryFactory,
+        TemporaryDirectoryFactory&Stub $temporaryDirectoryFactory,
         MockObject $appExtractor,
         MockObject $filesystem,
         string $appName,
         string $zipUrl,
         array $chunks
     ): void {
-        $temporaryDirectoryFactory->expects($this->any())
-            ->method('path')
+        $temporaryDirectoryFactory->method('path')
             ->willReturn('/tmp/test');
 
         $filesystem->expects($this->once())

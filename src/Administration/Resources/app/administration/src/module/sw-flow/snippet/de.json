@@ -169,6 +169,8 @@
         "placeholderDescription": "Regelbeschreibung eingeben ...",
         "labelType": "Typ",
         "placeholderType": "Regeltyp auswählen ...",
+        "deprecatedConditionWarning": "Die Bedingung \"{label}\" ist veraltet und wird mit {version} entfernt. Bitte stattdessen \"{replacement}\" verwenden.",
+        "deprecatedConditionWarningNoReplacement": "Die Bedingung \"{label}\" ist veraltet und wird mit {version} entfernt.",
         "placeholderDelayType": "Verzögerung auswählen ..."
       },
       "tag": {
@@ -189,12 +191,19 @@
         "placeholderDeliveryStatus": "Versandstatus wählen ...",
         "messageNoStatusError": "Mindestens ein Status muss ausgewählt sein",
         "forceTransition": "Statuswechsel erzwingen",
-        "forceTransitionHelpText": "Statuswechsel werden durchgeführt, ohne den Ausgangspunkt oder die üblichen Übergangspfade (state machine) zu beachten."
+        "forceTransitionHelpText": "Statuswechsel werden durchgeführt, ohne den Ausgangspunkt oder die üblichen Übergangspfade (state machine) zu beachten.",
+        "transitionWarning": {
+          "message": "Vorsicht bei der Verwendung von Statuswechseln, da diese zu fehlerhaften Flows führen können, wenn der Statuswechsel nicht gültig ist. Um solche Probleme zu vermeiden, kann die Option \"Statuswechsel erzwingen\" aktiviert werden."
+        }
       },
       "document": {
         "titleCreateDocument": "Dokumente erzeugen",
         "labelDocumentType": "Dokumente",
-        "placeholderDocumentType": "Dokumente auswählen ..."
+        "placeholderDocumentType": "Dokumente auswählen ...",
+        "labelDocumentTypeSingle": "Dokumenttyp",
+        "placeholderDocumentTypeSingle": "Dokumenttyp auswählen ...",
+        "labelFileFormats": "Dateiformate",
+        "placeholderFileFormats": "Dateiformate auswählen ..."
       },
       "downloadAccess": {
         "titleSetDownloadAccess": "Download-Recht setzen",
@@ -247,6 +256,7 @@
         "labelAdmin": "Administrator",
         "labelCustom": "Benutzerdefiniert",
         "labelContactFormMail": "Anfragesteller",
+        "labelRevocationRequestFormMail": "Anfragesteller",
         "labelRecipient": "Empfänger",
         "placeholderRecipient": "E-Mail-Empfänger auswählen ...",
         "useDifferentReplyToLabel": "Absender",
@@ -289,7 +299,6 @@
       }
     },
     "leavePageModal": {
-      "headline": "Warnung",
       "description": "Ungespeicherte Änderungen vorhanden. Willst Du die Seite trotzdem verlassen?",
       "confirmButton": "Seite verlassen"
     },
@@ -301,6 +310,8 @@
       "paymentMethod": "Zahlungsart",
       "contactForm": "Kontaktformular",
       "reviewForm": "Produktbewertung",
+      "revocationRequestMerchant": "Widerrufsantrag erhalten",
+      "revocationRequestCustomer": "Widerrufsantrag gesendet",
       "group": "Gruppe",
       "recovery": "Wiederherstellung",
       "registration": "Registrierung",
@@ -332,7 +343,6 @@
       "request": "Anfrage",
       "message": "Nachricht",
       "sent": "Abgeschickt",
-      "confirm": "Bestätigen",
       "unsubscribe": "Abbestellen",
       "log": "Protokoll",
       "cancelled": "Abgebrochen",
@@ -354,7 +364,8 @@
       "unconfirmed": "Unbestätigt",
       "pending": "Ausstehend",
       "changed": "Geändert",
-      "update": "Aktualisierung"
+      "update": "Aktualisierung",
+      "password": "Passwort"
     }
   },
   "sw-privileges": {

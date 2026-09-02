@@ -30,6 +30,11 @@ class PromotionRedemptionUpdater implements EventSubscriberInterface
     private array $promotionIds = [];
 
     /**
+     * @var list<array{code: string, orderId: string}>
+     */
+    private array $deletedCodes = [];
+
+    /**
      * @internal
      */
     public function __construct(
@@ -59,16 +64,17 @@ class PromotionRedemptionUpdater implements EventSubscriberInterface
             }
         }
 
-        if (empty($lineItemsIds)) {
+        if ($lineItemsIds === []) {
             return;
         }
 
         $sql = <<<'SQL'
-            SELECT LOWER(HEX(`promotion_id`)) FROM `order_line_item`
+            SELECT LOWER(HEX(`promotion_id`)) as `promotion_id`, `payload`, LOWER(HEX(`order_id`)) as `order_id` FROM `order_line_item`
             WHERE `promotion_id` IS NOT NULL AND `type` = :type AND `id` IN (:ids) AND `version_id` = :versionId;
         SQL;
 
-        $this->promotionIds = $this->connection->fetchFirstColumn(
+        /** @var list<array{promotion_id: string, payload: ?string, order_id: string}> $lineItems */
+        $lineItems = $this->connection->fetchAllAssociative(
             $sql,
             [
                 'type' => PromotionProcessor::LINE_ITEM_TYPE,
@@ -77,15 +83,33 @@ class PromotionRedemptionUpdater implements EventSubscriberInterface
             ],
             ['ids' => ArrayParameterType::BINARY],
         );
+
+        $this->promotionIds = array_values(array_unique(array_column($lineItems, 'promotion_id')));
+
+        $this->deletedCodes = [];
+        foreach ($lineItems as $lineItem) {
+            $payload = json_decode((string) $lineItem['payload'], true);
+            $code = \is_array($payload) ? ($payload['code'] ?? '') : '';
+
+            if (\is_string($code) && $code !== '') {
+                $this->deletedCodes[] = ['code' => $code, 'orderId' => $lineItem['order_id']];
+            }
+        }
     }
 
     public function lineItemDeleted(EntityDeletedEvent $event): void
     {
-        if (!empty($this->promotionIds)) {
+        if ($this->promotionIds !== []) {
             // Update all promotions, we searched beforeDelete
             $this->update($this->promotionIds, $event->getContext());
 
             $this->promotionIds = [];
+        }
+
+        if ($this->deletedCodes !== []) {
+            $this->releaseIndividualCodes($this->deletedCodes);
+
+            $this->deletedCodes = [];
         }
     }
 
@@ -96,9 +120,9 @@ class PromotionRedemptionUpdater implements EventSubscriberInterface
         }
 
         $promotionIds = [];
-        foreach ($event->getWriteResults() as $writeResult) {
+        foreach ($event->getResults()->only(EntityWriteResult::OPERATION_INSERT, EntityWriteResult::OPERATION_UPDATE) as $writeResult) {
             $type = $writeResult->getPayload()['type'] ?? null;
-            if ($writeResult->getOperation() !== EntityWriteResult::OPERATION_DELETE && $type === PromotionProcessor::LINE_ITEM_TYPE) {
+            if ($type === PromotionProcessor::LINE_ITEM_TYPE) {
                 $promotionIds[] = $writeResult->getPayload()['promotionId'] ?? null;
             }
         }
@@ -113,7 +137,7 @@ class PromotionRedemptionUpdater implements EventSubscriberInterface
     {
         $ids = array_unique(array_filter($ids));
 
-        if (empty($ids) || $context->getVersionId() !== Defaults::LIVE_VERSION) {
+        if ($ids === [] || $context->getVersionId() !== Defaults::LIVE_VERSION) {
             return;
         }
 
@@ -124,7 +148,7 @@ class PromotionRedemptionUpdater implements EventSubscriberInterface
             FROM order_line_item
                      LEFT JOIN order_customer
                                ON (order_customer.order_id = order_line_item.order_id
-                                   AND order_customer.version_id = order_line_item.version_id)
+                                   AND order_customer.order_version_id = order_line_item.order_version_id)
             WHERE order_line_item.promotion_id IN (:ids) AND order_line_item.version_id = :versionId AND order_line_item.type = :type
             GROUP BY order_line_item.promotion_id, order_customer.customer_id
         SQL;
@@ -148,8 +172,31 @@ class PromotionRedemptionUpdater implements EventSubscriberInterface
             $update->execute([
                 'id' => Uuid::fromHexToBytes($id),
                 'count' => (int) array_sum($totals),
-                'customerCount' => !empty($totals) ? json_encode($totals, \JSON_THROW_ON_ERROR) : null,
+                'customerCount' => $totals !== [] ? json_encode($totals, \JSON_THROW_ON_ERROR) : null,
             ]);
+        }
+    }
+
+    /**
+     * Individual codes are marked as redeemed by a payload written to promotion_individual_code
+     * (see PromotionIndividualCodeRedeemer); the cart only accepts codes whose payload is NULL.
+     * Releasing the code again when its promotion line item is deleted from the order restores
+     * the behaviour of PromotionRedemptionUpdater::beforeDeletePromotionLineItems in 6.6,
+     * additionally scoped to codes actually redeemed by the order the line item belonged to.
+     *
+     * @param list<array{code: string, orderId: string}> $deletedCodes
+     */
+    private function releaseIndividualCodes(array $deletedCodes): void
+    {
+        $update = new RetryableQuery(
+            $this->connection,
+            $this->connection->prepare(
+                'UPDATE promotion_individual_code SET payload = NULL WHERE code = :code AND JSON_UNQUOTE(JSON_EXTRACT(payload, \'$.orderId\')) = :orderId'
+            )
+        );
+
+        foreach ($deletedCodes as $deletedCode) {
+            $update->execute($deletedCode);
         }
     }
 

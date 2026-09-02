@@ -6,7 +6,7 @@ use Shopware\Core\Framework\Log\Package;
 use Shopware\Storefront\Page\Robots\Struct\RobotsDirective;
 use Shopware\Storefront\Page\Robots\Struct\RobotsUserAgentBlock;
 
-#[Package('framework')]
+#[Package('discovery')]
 class ParsedRobots
 {
     /**
@@ -23,7 +23,7 @@ class ParsedRobots
 
     public function hasUserAgentBlocks(): bool
     {
-        return \count($this->userAgentBlocks) > 0;
+        return $this->userAgentBlocks !== [];
     }
 
     public function hasErrors(): bool

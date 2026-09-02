@@ -11,6 +11,8 @@ use Shopware\Core\Framework\Adapter\Cache\Http\HttpCacheKeyGenerator;
 use Shopware\Core\Framework\Adapter\Cache\InvalidateCacheEvent;
 use Shopware\Core\Framework\Adapter\Cache\ReverseProxy\AbstractReverseProxyGateway;
 use Shopware\Core\Framework\Adapter\Cache\ReverseProxy\ReverseProxyCache;
+use Shopware\Core\Framework\Log\Package;
+use Shopware\Core\Test\Annotation\DisabledFeatures;
 use Shopware\Storefront\Framework\Routing\RequestTransformer;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -20,6 +22,7 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 /**
  * @internal
  */
+#[Package('framework')]
 #[CoversClass(ReverseProxyCache::class)]
 class ReverseProxyCacheTest extends TestCase
 {
@@ -33,8 +36,8 @@ class ReverseProxyCacheTest extends TestCase
             $gateway,
             [],
             new CacheTagCollector(
-                $this->createMock(RequestStack::class),
-                $this->createMock(EventDispatcherInterface::class),
+                static::createStub(RequestStack::class),
+                static::createStub(EventDispatcherInterface::class),
             )
         );
 
@@ -55,8 +58,8 @@ class ReverseProxyCacheTest extends TestCase
             $gateway,
             [],
             new CacheTagCollector(
-                $this->createMock(RequestStack::class),
-                $this->createMock(EventDispatcherInterface::class),
+                static::createStub(RequestStack::class),
+                static::createStub(EventDispatcherInterface::class),
             )
         );
 
@@ -75,11 +78,11 @@ class ReverseProxyCacheTest extends TestCase
     public function testLookup(): void
     {
         $store = new ReverseProxyCache(
-            $this->createMock(AbstractReverseProxyGateway::class),
+            static::createStub(AbstractReverseProxyGateway::class),
             [],
             new CacheTagCollector(
-                $this->createMock(RequestStack::class),
-                $this->createMock(EventDispatcherInterface::class),
+                static::createStub(RequestStack::class),
+                static::createStub(EventDispatcherInterface::class),
             )
         );
 
@@ -90,14 +93,18 @@ class ReverseProxyCacheTest extends TestCase
         $store->cleanup();
     }
 
+    /**
+     * @deprecated tag:v6.8.0 - can be deleted as cache states are removed
+     */
+    #[DisabledFeatures(['v6.8.0.0', 'PERFORMANCE_TWEAKS', 'CACHE_REWORK'])]
     public function testWriteAddsGlobalStates(): void
     {
         $store = new ReverseProxyCache(
-            $this->createMock(AbstractReverseProxyGateway::class),
+            static::createStub(AbstractReverseProxyGateway::class),
             [CacheStateSubscriber::STATE_LOGGED_IN],
             new CacheTagCollector(
-                $this->createMock(RequestStack::class),
-                $this->createMock(EventDispatcherInterface::class),
+                static::createStub(RequestStack::class),
+                static::createStub(EventDispatcherInterface::class),
             )
         );
 
@@ -118,8 +125,8 @@ class ReverseProxyCacheTest extends TestCase
             $gateway,
             [],
             new CacheTagCollector(
-                $this->createMock(RequestStack::class),
-                $this->createMock(EventDispatcherInterface::class),
+                static::createStub(RequestStack::class),
+                static::createStub(EventDispatcherInterface::class),
             )
         );
 
@@ -134,8 +141,8 @@ class ReverseProxyCacheTest extends TestCase
             $gateway,
             [],
             new CacheTagCollector(
-                $this->createMock(RequestStack::class),
-                $this->createMock(EventDispatcherInterface::class),
+                static::createStub(RequestStack::class),
+                static::createStub(EventDispatcherInterface::class),
             )
         );
         $store->invalidate(new Request());
@@ -160,8 +167,8 @@ class ReverseProxyCacheTest extends TestCase
         $gateway = $this->createMock(AbstractReverseProxyGateway::class);
         $gateway->expects($this->once())->method('invalidate')->with(['foo']);
         $store = new ReverseProxyCache($gateway, [], new CacheTagCollector(
-            $this->createMock(RequestStack::class),
-            $this->createMock(EventDispatcherInterface::class)
+            static::createStub(RequestStack::class),
+            static::createStub(EventDispatcherInterface::class)
         ));
         $store(new InvalidateCacheEvent(['foo']));
     }

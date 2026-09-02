@@ -115,13 +115,13 @@ class DeleteExpiredFilesServiceTest extends TestCase
 
         // Verify expired files are deleted
         foreach ($expiredIds as $id) {
-            $file = $this->fileRepository->search(new Criteria([$id]), $this->context)->first();
+            $file = $this->fileRepository->search(new Criteria([$id]), $this->context)->getEntities()->first();
             static::assertNull($file, "Expired file with ID {$id} should be deleted");
         }
 
         // Verify non-expired files still exist
         foreach ($nonExpiredIds as $id) {
-            $file = $this->fileRepository->search(new Criteria([$id]), $this->context)->first();
+            $file = $this->fileRepository->search(new Criteria([$id]), $this->context)->getEntities()->first();
             static::assertNotNull($file, "Non-expired file with ID {$id} should still exist");
         }
     }
@@ -163,8 +163,8 @@ class DeleteExpiredFilesServiceTest extends TestCase
     {
         // Ensure no files exist
         $allFiles = $this->fileRepository->searchIds(new Criteria(), $this->context)->getIds();
-        if (!empty($allFiles)) {
-            $deleteData = array_map(fn ($id) => ['id' => $id], $allFiles);
+        if ($allFiles !== []) {
+            $deleteData = array_map(static fn ($id) => ['id' => $id], $allFiles);
             $this->fileRepository->delete($deleteData, $this->context);
         }
 

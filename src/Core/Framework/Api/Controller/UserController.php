@@ -2,6 +2,7 @@
 
 namespace Shopware\Core\Framework\Api\Controller;
 
+use Doctrine\DBAL\Connection;
 use League\OAuth2\Server\Exception\OAuthServerException;
 use Shopware\Core\Framework\Api\Acl\Role\AclRoleCollection;
 use Shopware\Core\Framework\Api\Acl\Role\AclRoleDefinition;
@@ -18,6 +19,7 @@ use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Routing\ApiRouteScope;
 use Shopware\Core\Framework\Sso\SsoService;
+use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\PlatformRequest;
 use Shopware\Core\System\User\Aggregate\UserAccessKey\UserAccessKeyCollection;
 use Shopware\Core\System\User\UserCollection;
@@ -27,8 +29,8 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 
-#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [ApiRouteScope::ID]])]
 #[Package('fundamentals@framework')]
+#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [ApiRouteScope::ID]])]
 class UserController extends AbstractController
 {
     /**
@@ -46,10 +48,15 @@ class UserController extends AbstractController
         private readonly EntityRepository $keyRepository,
         private readonly UserDefinition $userDefinition,
         private readonly SsoService $ssoService,
+        private readonly Connection $connection,
     ) {
     }
 
-    #[Route(path: '/api/_info/me', name: 'api.info.me', methods: ['GET'])]
+    #[Route(
+        path: '/api/_info/me',
+        name: 'api.info.me',
+        methods: [Request::METHOD_GET]
+    )]
     public function me(Context $context, Request $request, ResponseFactoryInterface $responseFactory): Response
     {
         if (!$context->getSource() instanceof AdminApiSource) {
@@ -71,7 +78,15 @@ class UserController extends AbstractController
         return $responseFactory->createDetailResponse(new Criteria(), $user, $this->userDefinition, $request, $context);
     }
 
-    #[Route(path: '/api/_info/me', name: 'api.change.me', defaults: ['auth_required' => true, '_acl' => ['user_change_me']], methods: ['PATCH'])]
+    #[Route(
+        path: '/api/_info/me',
+        name: 'api.change.me',
+        defaults: [
+            'auth_required' => true,
+            PlatformRequest::ATTRIBUTE_ACL => ['user_change_me'],
+        ],
+        methods: [Request::METHOD_PATCH]
+    )]
     public function updateMe(Context $context, Request $request, ResponseFactoryInterface $responseFactory): Response
     {
         if (!$context->getSource() instanceof AdminApiSource) {
@@ -83,16 +98,23 @@ class UserController extends AbstractController
             throw ApiException::userNotLoggedIn();
         }
 
-        $allowedChanges = ['firstName', 'lastName', 'username', 'localeId', 'email', 'avatarMedia', 'avatarId', 'password'];
+        $allowedChanges = ['firstName', 'lastName', 'username', 'localeId', 'email', 'avatarMedia', 'avatarId', 'password', 'timeZone'];
 
-        if (!empty(array_diff(array_keys($request->request->all()), $allowedChanges))) {
+        if (array_diff(array_keys($request->request->all()), $allowedChanges) !== []) {
             throw ApiException::missingPrivileges(['user:update']);
         }
 
-        return $this->upsertUser($userId, $request, $context, $responseFactory);
+        return $context->scope(
+            Context::SYSTEM_SCOPE,
+            fn (Context $context): Response => $this->upsertUser($userId, $request, $context, $responseFactory),
+        );
     }
 
-    #[Route(path: '/api/_info/ping', name: 'api.info.ping', methods: ['GET'])]
+    #[Route(
+        path: '/api/_info/ping',
+        name: 'api.info.ping',
+        methods: [Request::METHOD_GET]
+    )]
     public function status(Context $context): Response
     {
         if (!$context->getSource() instanceof AdminApiSource) {
@@ -112,7 +134,36 @@ class UserController extends AbstractController
         return new Response(null, Response::HTTP_NO_CONTENT);
     }
 
-    #[Route(path: '/api/user/{userId}', name: 'api.user.delete', defaults: ['auth_required' => true, '_acl' => ['user:delete']], methods: ['DELETE'])]
+    #[Route(
+        path: '/api/_action/user/logout',
+        name: 'api.action.user.logout',
+        methods: [Request::METHOD_POST]
+    )]
+    public function logout(Context $context): Response
+    {
+        if (!$context->getSource() instanceof AdminApiSource) {
+            throw ApiException::invalidAdminSource($context->getSource()::class);
+        }
+
+        $userId = $context->getSource()->getUserId();
+        if (!$userId) {
+            throw ApiException::userNotLoggedIn();
+        }
+
+        $this->ssoService->revokeUserTokens($userId);
+
+        return new Response(null, Response::HTTP_NO_CONTENT);
+    }
+
+    #[Route(
+        path: '/api/user/{userId}',
+        name: 'api.user.delete',
+        defaults: [
+            'auth_required' => true,
+            PlatformRequest::ATTRIBUTE_ACL => ['user:delete'],
+        ],
+        methods: [Request::METHOD_DELETE]
+    )]
     public function deleteUser(string $userId, Request $request, Context $context, ResponseFactoryInterface $factory): Response
     {
         $this->validateScope($request);
@@ -133,7 +184,15 @@ class UserController extends AbstractController
         return $factory->createRedirectResponse($this->userRepository->getDefinition(), $userId, $request, $context);
     }
 
-    #[Route(path: '/api/user/{userId}/access-keys/{id}', name: 'api.user_access_keys.delete', defaults: ['auth_required' => true, '_acl' => ['user_access_key:delete']], methods: ['DELETE'])]
+    #[Route(
+        path: '/api/user/{userId}/access-keys/{id}',
+        name: 'api.user_access_keys.delete',
+        defaults: [
+            'auth_required' => true,
+            PlatformRequest::ATTRIBUTE_ACL => ['user_access_key:delete'],
+        ],
+        methods: [Request::METHOD_DELETE]
+    )]
     public function deleteUserAccessKey(string $id, Request $request, Context $context, ResponseFactoryInterface $factory): Response
     {
         $this->validateScope($request);
@@ -145,39 +204,80 @@ class UserController extends AbstractController
         return $factory->createRedirectResponse($this->keyRepository->getDefinition(), $id, $request, $context);
     }
 
-    #[Route(path: '/api/user', name: 'api.user.create', defaults: ['auth_required' => true, '_acl' => ['user:create']], methods: ['POST'])]
+    #[Route(
+        path: '/api/user',
+        name: 'api.user.create',
+        defaults: [
+            'auth_required' => true,
+            PlatformRequest::ATTRIBUTE_ACL => ['user:create'],
+        ],
+        methods: [Request::METHOD_POST]
+    )]
     public function upsertUser(?string $userId, Request $request, Context $context, ResponseFactoryInterface $factory): Response
     {
         $this->validateScope($request);
 
         $data = $request->request->all();
-        if (!isset($data['id'])) {
-            $data['id'] = null;
-        }
-        $data['id'] = $userId ?: $data['id'];
+        $admin = $data['admin'] ?? null;
+        $changesAdmin = isset($data['admin']);
+        unset($data['admin']);
+
+        $entityId = $userId ?? $data['id'] ?? Uuid::randomHex();
+        \assert(\is_string($entityId));
+        $data['id'] = $entityId;
 
         $source = $context->getSource();
-        if ((!$source instanceof AdminApiSource)
-            || (!$source->isAllowed('user:update')
-            && $source->getUserId() !== $data['id'])
-        ) {
+        if (!$source instanceof AdminApiSource) {
             throw new PermissionDeniedException();
         }
 
-        $events = $context->scope(Context::SYSTEM_SCOPE, fn (Context $context) => $this->userRepository->upsert([$data], $context));
-        $eventIds = $events->getEventByEntityName(UserDefinition::ENTITY_NAME)?->getIds() ?? [];
-        $entityId = array_last($eventIds);
+        $isSelfUpdate = $source->getUserId() === $data['id'];
+        $canUpdateUsers = $source->isAllowed('user:update');
+
+        if (!$canUpdateUsers && !$isSelfUpdate) {
+            throw new PermissionDeniedException();
+        }
+
+        if (!$source->isAdmin() && $changesAdmin) {
+            throw new PermissionDeniedException();
+        }
+
+        $this->connection->transactional(function () use ($data, $context, $changesAdmin, $admin, $entityId): void {
+            $this->userRepository->upsert([$data], $context);
+
+            if ($changesAdmin) {
+                $context->scope(Context::SYSTEM_SCOPE, function (Context $context) use ($entityId, $admin): void {
+                    $this->userRepository->update([['id' => $entityId, 'admin' => $admin]], $context);
+                });
+            }
+        });
 
         return $factory->createRedirectResponse($this->userRepository->getDefinition(), $entityId, $request, $context);
     }
 
-    #[Route(path: '/api/user/{userId}', name: 'api.user.update', defaults: ['auth_required' => true, '_acl' => ['user:update']], methods: ['PATCH'])]
+    #[Route(
+        path: '/api/user/{userId}',
+        name: 'api.user.update',
+        defaults: [
+            'auth_required' => true,
+            PlatformRequest::ATTRIBUTE_ACL => ['user:update'],
+        ],
+        methods: [Request::METHOD_PATCH]
+    )]
     public function updateUser(?string $userId, Request $request, Context $context, ResponseFactoryInterface $factory): Response
     {
         return $this->upsertUser($userId, $request, $context, $factory);
     }
 
-    #[Route(path: '/api/acl-role', name: 'api.acl_role.create', defaults: ['auth_required' => true, '_acl' => ['acl_role:create']], methods: ['POST'])]
+    #[Route(
+        path: '/api/acl-role',
+        name: 'api.acl_role.create',
+        defaults: [
+            'auth_required' => true,
+            PlatformRequest::ATTRIBUTE_ACL => ['acl_role:create'],
+        ],
+        methods: [Request::METHOD_POST]
+    )]
     public function upsertRole(?string $roleId, Request $request, Context $context, ResponseFactoryInterface $factory): Response
     {
         $this->validateScope($request);
@@ -185,7 +285,7 @@ class UserController extends AbstractController
         $data = $request->request->all();
 
         if (!isset($data['id'])) {
-            $data['id'] = $roleId ?? null;
+            $data['id'] = $roleId;
         }
 
         $events = $context->scope(Context::SYSTEM_SCOPE, fn (Context $context) => $this->roleRepository->upsert([$data], $context));
@@ -196,13 +296,29 @@ class UserController extends AbstractController
         return $factory->createRedirectResponse($this->roleRepository->getDefinition(), $entityId, $request, $context);
     }
 
-    #[Route(path: '/api/acl-role/{roleId}', name: 'api.acl_role.update', defaults: ['auth_required' => true, '_acl' => ['acl_role:update']], methods: ['PATCH'])]
+    #[Route(
+        path: '/api/acl-role/{roleId}',
+        name: 'api.acl_role.update',
+        defaults: [
+            'auth_required' => true,
+            PlatformRequest::ATTRIBUTE_ACL => ['acl_role:update'],
+        ],
+        methods: [Request::METHOD_PATCH]
+    )]
     public function updateRole(?string $roleId, Request $request, Context $context, ResponseFactoryInterface $factory): Response
     {
         return $this->upsertRole($roleId, $request, $context, $factory);
     }
 
-    #[Route(path: '/api/user/{userId}/acl-roles/{roleId}', name: 'api.user_role.delete', defaults: ['auth_required' => true, '_acl' => ['acl_user_role:delete']], methods: ['DELETE'])]
+    #[Route(
+        path: '/api/user/{userId}/acl-roles/{roleId}',
+        name: 'api.user_role.delete',
+        defaults: [
+            'auth_required' => true,
+            PlatformRequest::ATTRIBUTE_ACL => ['acl_user_role:delete'],
+        ],
+        methods: [Request::METHOD_DELETE]
+    )]
     public function deleteUserRole(string $userId, string $roleId, Request $request, Context $context, ResponseFactoryInterface $factory): Response
     {
         $this->validateScope($request);
@@ -214,7 +330,15 @@ class UserController extends AbstractController
         return $factory->createRedirectResponse($this->userRoleRepository->getDefinition(), $roleId, $request, $context);
     }
 
-    #[Route(path: '/api/acl-role/{roleId}', name: 'api.acl_role.delete', defaults: ['auth_required' => true, '_acl' => ['acl_role:delete']], methods: ['DELETE'])]
+    #[Route(
+        path: '/api/acl-role/{roleId}',
+        name: 'api.acl_role.delete',
+        defaults: [
+            'auth_required' => true,
+            PlatformRequest::ATTRIBUTE_ACL => ['acl_role:delete'],
+        ],
+        methods: [Request::METHOD_DELETE]
+    )]
     public function deleteRole(string $roleId, Request $request, Context $context, ResponseFactoryInterface $factory): Response
     {
         $this->validateScope($request);

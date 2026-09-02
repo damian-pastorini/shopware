@@ -1,6 +1,7 @@
 import { isPlayableMediaFormat, shouldShowUnsupportedFormatWarning } from 'src/app/service/media-format.service';
 import template from './sw-media-quickinfo.html.twig';
 import './sw-media-quickinfo.scss';
+import 'src/module/sw-media/mixin/video-cover.mixin';
 
 const { Mixin, Context, Utils } = Shopware;
 const { dom, format } = Utils;
@@ -29,6 +30,7 @@ export default {
     mixins: [
         Mixin.getByName('notification'),
         Mixin.getByName('media-sidebar-modal-mixin'),
+        Mixin.getByName('video-cover'),
         Mixin.getByName('placeholder'),
     ],
 
@@ -60,6 +62,8 @@ export default {
             arPlacement: 'horizontal',
             defaultArPlacement: 'horizontal',
             arPlacementOptions: [],
+            showCoverSelectionModal: false,
+            showModelEditorModal: false,
         };
     },
 
@@ -97,7 +101,16 @@ export default {
 
         extensionSdkButtons() {
             return Shopware.Store.get('actionButtons').buttons.filter((button) => {
-                return button.entity === 'media' && button.view === 'item';
+                if (button.entity !== 'media' || button.view !== 'item') {
+                    return false;
+                }
+
+                return (
+                    !button.fileTypes?.length ||
+                    button.fileTypes.some((type) => {
+                        return type.toLowerCase() === this.item.fileExtension.toLowerCase();
+                    })
+                );
             });
         },
 
@@ -107,6 +120,35 @@ export default {
 
         showUnsupportedFormatWarning() {
             return shouldShowUnsupportedFormatWarning(this.item.mimeType);
+        },
+
+        canManageVideoCover() {
+            return this.isVideoMedia && this.isPlayable;
+        },
+
+        editorTooltip() {
+            const isDisabled = !this.acl.can('media.editor');
+            return {
+                message: this.$t('sw-privileges.tooltip.warning'),
+                disabled: this.acl.can('media.editor'),
+                showOnDisabledElements: isDisabled,
+            };
+        },
+
+        deleterTooltip() {
+            return {
+                message: this.$t('sw-privileges.tooltip.warning'),
+                disabled: this.acl.can('media.deleter'),
+                showOnDisabledElements: true,
+            };
+        },
+
+        fileName() {
+            if (this.item.fileExtension) {
+                return `${this.item.fileName}.${this.item.fileExtension}`;
+            }
+
+            return this.item.fileName;
         },
     },
 
@@ -125,6 +167,12 @@ export default {
 
     methods: {
         createdComponent() {
+            Shopware.ExtensionAPI.publishData({
+                id: 'sw-media-quickinfo__item',
+                path: 'item',
+                scope: this,
+            });
+
             this.loadCustomFieldSets();
             this.fetchSpatialItemConfig();
         },
@@ -147,7 +195,7 @@ export default {
                             return {
                                 id: option.id,
                                 value: option.id,
-                                label: this.$tc(`sw-media.sidebar.actions.${option.id}`),
+                                label: this.$t(`sw-media.sidebar.actions.${option.id}`),
                             };
                         });
                     });
@@ -170,7 +218,7 @@ export default {
                 settingsLink: routeData.href,
             };
 
-            return this.$tc(snippet, 0, data);
+            return this.$t(snippet, data);
         },
 
         loadCustomFieldSets() {
@@ -218,12 +266,11 @@ export default {
                 try {
                     await dom.copyStringToClipboard(this.item.url);
                     this.createNotificationSuccess({
-                        message: this.$tc('sw-media.general.notification.urlCopied.message'),
+                        message: this.$t('sw-media.general.notification.urlCopied.message'),
                     });
-                } catch (err) {
+                } catch (_err) {
                     this.createNotificationError({
-                        title: this.$tc('global.default.error'),
-                        message: this.$tc('global.sw-field.notification.notificationCopyFailureMessage'),
+                        message: this.$t('global.sw-field.notification.notificationCopyFailureMessage'),
                     });
                 }
             }
@@ -266,7 +313,7 @@ export default {
                 item.fileName = value;
 
                 this.createNotificationSuccess({
-                    message: this.$tc('global.sw-media-media-item.notification.renamingSuccess.message'),
+                    message: this.$t('global.sw-media-media-item.notification.renamingSuccess.message'),
                 });
                 this.$emit('media-item-rename-success', item);
             } catch (exception) {
@@ -284,18 +331,14 @@ export default {
             switch (error.code) {
                 case 'CONTENT__MEDIA_FILE_NAME_IS_TOO_LONG':
                     this.createNotificationError({
-                        message: this.$tc(
-                            'global.sw-media-media-item.notification.fileNameTooLong.message',
-                            {
-                                length: error.meta.parameters.maxLength,
-                            },
-                            0,
-                        ),
+                        message: this.$t('global.sw-media-media-item.notification.fileNameTooLong.message', {
+                            length: error.meta.parameters.maxLength,
+                        }),
                     });
                     break;
                 default:
                     this.createNotificationError({
-                        message: this.$tc('global.sw-media-media-item.notification.renamingError.message'),
+                        message: this.$t('global.sw-media-media-item.notification.renamingError.message'),
                     });
             }
         },
@@ -389,6 +432,52 @@ export default {
                 mimeType,
                 fileSize,
             });
+        },
+
+        openModelEditorModal() {
+            this.showModelEditorModal = true;
+        },
+
+        closeModelEditorModal() {
+            this.showModelEditorModal = false;
+        },
+
+        downloadMedia() {
+            this.mediaService
+                .prepareDownloadMedia(this.item.id)
+                .then((download) => {
+                    if (download.type === 'external') {
+                        this.triggerDownload(download.url);
+
+                        return;
+                    }
+
+                    return this.mediaService.downloadMedia(this.item.id).then((data) => {
+                        const url = window.URL.createObjectURL(data);
+                        this.triggerDownload(url, this.fileName);
+                        URL.revokeObjectURL(url);
+                    });
+                })
+                .catch(() => {
+                    this.createNotificationError({
+                        message: this.$t('global.sw-media-media-item.notification.downloadError.message'),
+                    });
+                });
+        },
+
+        triggerDownload(url, fileName = null) {
+            const link = document.createElement('a');
+            link.href = url;
+
+            if (fileName) {
+                link.download = fileName;
+            } else {
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+            }
+
+            link.dispatchEvent(new MouseEvent('click'));
+            link.remove();
         },
     },
 };

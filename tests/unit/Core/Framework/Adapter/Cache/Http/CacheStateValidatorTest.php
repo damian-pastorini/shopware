@@ -8,6 +8,8 @@ use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Shopware\Core\Framework\Adapter\Cache\Http\CacheStateValidator;
 use Shopware\Core\Framework\Adapter\Cache\Http\HttpCacheKeyGenerator;
+use Shopware\Core\Framework\Log\Package;
+use Shopware\Core\Test\Annotation\DisabledFeatures;
 use Symfony\Component\HttpFoundation\Cookie;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -15,11 +17,13 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * @internal
  */
+#[Package('framework')]
 #[CoversClass(CacheStateValidator::class)]
 #[Group('cache')]
 class CacheStateValidatorTest extends TestCase
 {
     #[DataProvider('cases')]
+    #[DisabledFeatures(['v6.8.0.0'])]
     public function testValidation(bool $isValid, Request $request, Response $response): void
     {
         $validator = new CacheStateValidator([]);

@@ -40,11 +40,13 @@ use Shopware\Core\Framework\DataAbstractionLayer\Pricing\PriceCollection;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\EqualsFilter;
 use Shopware\Core\Framework\DataAbstractionLayer\Write\Validation\RestrictDeleteViolationException;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Struct\ArrayEntity;
 use Shopware\Core\Framework\Test\TestCaseBase\AdminApiTestBehaviour;
 use Shopware\Core\Framework\Test\TestCaseBase\KernelLifecycleManager;
 use Shopware\Core\Framework\Test\TestCaseBase\KernelTestBehaviour;
 use Shopware\Core\Framework\Test\TestCaseBase\SalesChannelApiTestBehaviour;
+use Shopware\Core\Framework\Util\Database\TableHelper;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\System\CustomEntity\Exception\CustomEntityXmlParsingException;
 use Shopware\Core\System\CustomEntity\Schema\CustomEntityPersister;
@@ -73,6 +75,7 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * @internal
  */
+#[Package('framework')]
 class CustomEntityTest extends TestCase
 {
     use AdminApiTestBehaviour;
@@ -111,7 +114,7 @@ class CustomEntityTest extends TestCase
             $definition = $container->get(DefinitionInstanceRegistry::class)->getByEntityName($entity);
 
             foreach ($definition->getFields() as $field) {
-                if (\str_starts_with((string) $field->getPropertyName(), 'customEntity')) {
+                if (\str_starts_with($field->getPropertyName(), 'customEntity')) {
                     $definition->getFields()->remove($field->getPropertyName());
                 }
             }
@@ -179,7 +182,7 @@ class CustomEntityTest extends TestCase
 
         foreach ($appRepository->search(new Criteria(), $context)->getEntities() as $installedApp) {
             // we keep user data, uninstall with removing user data is tested in the cleanupAppData() method
-            $appLifecycle->delete($installedApp->getName(), ['id' => $installedApp->getId()], $context, true);
+            $appLifecycle->uninstall($installedApp->getName(), ['id' => $installedApp->getId()], $context, true);
         }
 
         // with keepUserData=true the custom entity schema is not removed during app uninstall,
@@ -208,7 +211,7 @@ class CustomEntityTest extends TestCase
         $exceptionThrown = false;
         try {
             foreach ($appRepository->search(new Criteria(), $context)->getEntities() as $installedApp) {
-                $appLifecycle->delete($installedApp->getName(), ['id' => $installedApp->getId()], $context, true);
+                $appLifecycle->uninstall($installedApp->getName(), ['id' => $installedApp->getId()], $context, true);
             }
         } catch (AppException $e) {
             static::assertSame(AppException::APP_RESTRICT_DELETE_PREVENTS_DEACTIVATION, $e->getErrorCode());
@@ -305,7 +308,7 @@ class CustomEntityTest extends TestCase
         $repo = $container->get('ce_product_with_defaults.repository');
         static::assertInstanceOf(EntityRepository::class, $repo);
         $repo->create([['id' => Uuid::randomHex()]], $context);
-        $entity = $repo->search(new Criteria(), $context)->first();
+        $entity = $repo->search(new Criteria(), $context)->getEntities()->first();
         static::assertInstanceOf(DALEntity::class, $entity);
 
         foreach ($expectedDefaults as $field => $defaultValue) {
@@ -469,6 +472,8 @@ class CustomEntityTest extends TestCase
             )
             ->build();
 
+        unset($product['type']);
+
         $event = $container->get('product.repository')
             ->upsert([$product], Context::createDefaultContext());
 
@@ -485,7 +490,7 @@ class CustomEntityTest extends TestCase
         $criteria = new Criteria($ids->getList(['v1', 'v2']));
         $criteria->addAssociation('customEntityBlogInheritedProducts');
 
-        $products = $container->get('product.repository')->search($criteria, $context);
+        $products = $container->get('product.repository')->search($criteria, $context)->getEntities();
 
         static::assertCount(2, $products);
         $v1 = $products->get($ids->get('v1'));
@@ -515,7 +520,7 @@ class CustomEntityTest extends TestCase
 
         $criteria = new Criteria($ids->getList(['v2']));
         $criteria->addAssociation('customEntityBlogInheritedProducts');
-        $products = $container->get('product.repository')->search($criteria, $context);
+        $products = $container->get('product.repository')->search($criteria, $context)->getEntities();
 
         $v2 = $products->get($ids->get('v2'));
         static::assertInstanceOf(ProductEntity::class, $v2);
@@ -562,7 +567,7 @@ class CustomEntityTest extends TestCase
         $criteria = new Criteria($ids->getList(['one-to-one-1', 'one-to-one-2']));
         $criteria->addAssociation('customEntityBlogInheritedLinkProduct');
 
-        $products = $container->get('product.repository')->search($criteria, $context);
+        $products = $container->get('product.repository')->search($criteria, $context)->getEntities();
 
         static::assertCount(2, $products);
         $v1 = $products->get($ids->get('one-to-one-1'));
@@ -585,7 +590,7 @@ class CustomEntityTest extends TestCase
 
         $criteria = new Criteria($ids->getList(['one-to-one-2']));
         $criteria->addAssociation('customEntityBlogInheritedLinkProduct');
-        $products = $container->get('product.repository')->search($criteria, $context);
+        $products = $container->get('product.repository')->search($criteria, $context)->getEntities();
 
         $v2 = $products->get($ids->get('one-to-one-2'));
         static::assertInstanceOf(ProductEntity::class, $v2);
@@ -615,6 +620,8 @@ class CustomEntityTest extends TestCase
             )
             ->build();
 
+        unset($product['type']);
+
         $event = $container->get('product.repository')
             ->upsert([$product], Context::createDefaultContext());
 
@@ -630,7 +637,7 @@ class CustomEntityTest extends TestCase
         $criteria = new Criteria($ids->getList(['many-to-one-1', 'many-to-one-2']));
         $criteria->addAssociation('customEntityBlogInheritedTopSeller');
 
-        $products = $container->get('product.repository')->search($criteria, $context);
+        $products = $container->get('product.repository')->search($criteria, $context)->getEntities();
 
         static::assertCount(2, $products);
         $v1 = $products->get($ids->get('many-to-one-1'));
@@ -656,7 +663,7 @@ class CustomEntityTest extends TestCase
 
         $criteria = new Criteria($ids->getList(['many-to-one-2']));
         $criteria->addAssociation('customEntityBlogInheritedTopSeller');
-        $products = $container->get('product.repository')->search($criteria, $context);
+        $products = $container->get('product.repository')->search($criteria, $context)->getEntities();
 
         $v2 = $products->get($ids->get('many-to-one-2'));
         static::assertInstanceOf(ProductEntity::class, $v2);
@@ -677,7 +684,7 @@ class CustomEntityTest extends TestCase
         $table = $schema->getTable($table);
 
         foreach ($columns as $column) {
-            static::assertTrue($table->hasColumn($column), 'Column ' . $column . ' not found in table ' . $table->getName());
+            static::assertTrue($table->hasColumn($column), 'Column ' . $column . ' not found in table ' . $table->getObjectName()->toString());
         }
     }
 
@@ -826,7 +833,7 @@ class CustomEntityTest extends TestCase
         $criteria->addAssociation('linkProductSetNull');
         $criteria->addAssociation('linksSetNull');
 
-        $blogs = $repository->search($criteria, Context::createDefaultContext());
+        $blogs = $repository->search($criteria, Context::createDefaultContext())->getEntities();
 
         static::assertCount(1, $blogs);
         $blog = $blogs->first();
@@ -876,7 +883,7 @@ class CustomEntityTest extends TestCase
         // list
         $client->request('GET', '/api/custom-entity-blog', ['ids' => [$ids->get('blog-1')]], [], ['HTTP_ACCEPT' => 'application/json']);
         $response = $client->getResponse();
-        $body = json_decode((string) $response->getContent(), true, \JSON_THROW_ON_ERROR, \JSON_THROW_ON_ERROR);
+        $body = json_decode((string) $response->getContent(), true, flags: \JSON_THROW_ON_ERROR);
         static::assertSame(Response::HTTP_OK, $response->getStatusCode(), print_r($body, true));
 
         static::assertIsArray($body);
@@ -900,7 +907,7 @@ class CustomEntityTest extends TestCase
             \json_encode(['ids' => [$ids->get('blog-1')]], \JSON_THROW_ON_ERROR)
         );
         $response = $client->getResponse();
-        $body = json_decode((string) $response->getContent(), true, \JSON_THROW_ON_ERROR, \JSON_THROW_ON_ERROR);
+        $body = json_decode((string) $response->getContent(), true, flags: \JSON_THROW_ON_ERROR);
         static::assertSame(Response::HTTP_OK, $response->getStatusCode(), print_r($body, true));
 
         static::assertIsArray($body);
@@ -918,7 +925,7 @@ class CustomEntityTest extends TestCase
             ['HTTP_ACCEPT' => 'application/json'],
         );
         $response = $client->getResponse();
-        $body = json_decode((string) $response->getContent(), true, \JSON_THROW_ON_ERROR, \JSON_THROW_ON_ERROR);
+        $body = json_decode((string) $response->getContent(), true, flags: \JSON_THROW_ON_ERROR);
         static::assertSame(Response::HTTP_OK, $response->getStatusCode(), print_r($body, true));
 
         static::assertIsArray($body);
@@ -940,7 +947,7 @@ class CustomEntityTest extends TestCase
             ['HTTP_ACCEPT' => 'application/json'],
         );
         $response = $client->getResponse();
-        $body = json_decode((string) $response->getContent(), true, \JSON_THROW_ON_ERROR, \JSON_THROW_ON_ERROR);
+        $body = json_decode((string) $response->getContent(), true, flags: \JSON_THROW_ON_ERROR);
         static::assertSame(Response::HTTP_OK, $response->getStatusCode(), print_r($body, true));
 
         static::assertIsArray($body);
@@ -991,7 +998,7 @@ class CustomEntityTest extends TestCase
 
         static::assertSame(Response::HTTP_OK, $browser->getResponse()->getStatusCode(), print_r($response, true));
 
-        $traces = $this->getScriptTraces();
+        $traces = $this->getScriptTraces($browser->getContainer());
         static::assertArrayHasKey('store-api-blog::response', $traces);
         static::assertCount(1, $traces['store-api-blog::response']);
         static::assertSame('some debug information', $traces['store-api-blog::response'][0]['output'][0]);
@@ -1118,7 +1125,7 @@ class CustomEntityTest extends TestCase
         $context = Context::createDefaultContext();
 
         foreach ($appRepository->search(new Criteria(), $context)->getEntities() as $installedApp) {
-            $appLifecycle->delete($installedApp->getName(), ['id' => $installedApp->getId()], $context);
+            $appLifecycle->uninstall($installedApp->getName(), ['id' => $installedApp->getId()], $context);
         }
 
         $connection = $container->get(Connection::class);
@@ -1127,7 +1134,7 @@ class CustomEntityTest extends TestCase
         static::assertSame('0', $count, 'Custom entity table should be empty after app uninstall');
 
         static::assertFalse(
-            $connection->createSchemaManager()->tablesExist(['custom_entity_blog']),
+            TableHelper::tableExists($connection, 'custom_entity_blog'),
             'Custom entity table should not exist after app uninstall'
         );
 
@@ -1278,7 +1285,7 @@ class CustomEntityTest extends TestCase
         $criteria->addFilter(new EqualsFilter('name', 'custom-entity-test'));
 
         $app = static::getContainer()->get('app.repository')
-            ->search($criteria, Context::createDefaultContext())
+            ->search($criteria, Context::createDefaultContext())->getEntities()
             ->first();
 
         static::assertInstanceOf(AppEntity::class, $app);

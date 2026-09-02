@@ -218,7 +218,7 @@ class RulePayloadIndexerTest extends TestCase
 
         $this->indexer->handle(new EntityIndexingMessage([$id, $rule2Id]));
 
-        $rules = $this->ruleRepository->search(new Criteria([$id, $rule2Id]), $this->context);
+        $rules = $this->ruleRepository->search(new Criteria([$id, $rule2Id]), $this->context)->getEntities();
         $rule = $rules->get($id);
         static::assertInstanceOf(RuleEntity::class, $rule);
         static::assertInstanceOf(Rule::class, $rule->getPayload());
@@ -288,7 +288,7 @@ class RulePayloadIndexerTest extends TestCase
 
         $this->ruleRepository->create($data, $this->context);
 
-        $rules = $this->ruleRepository->search(new Criteria([$id, $rule2Id]), $this->context);
+        $rules = $this->ruleRepository->search(new Criteria([$id, $rule2Id]), $this->context)->getEntities();
         $rule = $rules->get($id);
         static::assertInstanceOf(RuleEntity::class, $rule);
         static::assertInstanceOf(Rule::class, $rule->getPayload());
@@ -430,6 +430,65 @@ class RulePayloadIndexerTest extends TestCase
         static::assertEquals(
             new AndRule([(new CurrencyRule())->assign(['currencyIds' => [$currencyId1, $currencyId2]])]),
             $rule->getPayload()
+        );
+    }
+
+    public function testRuleUpdatedAtIsUpdatedWhenConditionChanges(): void
+    {
+        $ruleId = Uuid::randomHex();
+        $conditionId = Uuid::randomHex();
+        $currencyId = Uuid::randomHex();
+
+        $data = [
+            'id' => $ruleId,
+            'name' => 'test rule',
+            'priority' => 1,
+            'conditions' => [
+                [
+                    'id' => $conditionId,
+                    'type' => (new CurrencyRule())->getName(),
+                    'value' => [
+                        'currencyIds' => [$currencyId],
+                        'operator' => CurrencyRule::OPERATOR_EQ,
+                    ],
+                ],
+            ],
+        ];
+
+        $this->ruleRepository->create([$data], $this->context);
+
+        $this->connection->executeStatement(
+            'UPDATE `rule` SET updated_at = DATE_SUB(NOW(), INTERVAL 1 HOUR) WHERE id = :id',
+            ['id' => Uuid::fromHexToBytes($ruleId)]
+        );
+
+        $updatedAtBefore = $this->connection->fetchOne(
+            'SELECT updated_at FROM rule WHERE id = :id',
+            ['id' => Uuid::fromHexToBytes($ruleId)]
+        );
+
+        static::assertIsString($updatedAtBefore, 'Rule updated_at should be set after creation');
+
+        $conditionRepository = static::getContainer()->get('rule_condition.repository');
+        $conditionRepository->update([
+            [
+                'id' => $conditionId,
+                'value' => [
+                    'currencyIds' => [$currencyId, Uuid::randomHex()],
+                    'operator' => CurrencyRule::OPERATOR_EQ,
+                ],
+            ],
+        ], $this->context);
+
+        $updatedAtAfter = $this->connection->fetchOne(
+            'SELECT updated_at FROM rule WHERE id = :id',
+            ['id' => Uuid::fromHexToBytes($ruleId)]
+        );
+
+        static::assertNotSame(
+            $updatedAtBefore,
+            $updatedAtAfter,
+            'Rule updated_at should change when a condition is updated'
         );
     }
 

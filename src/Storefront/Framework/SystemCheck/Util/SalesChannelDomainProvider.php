@@ -10,7 +10,7 @@ use Shopware\Core\Framework\Uuid\Uuid;
 /**
  * @internal
  */
-#[Package('framework')]
+#[Package('discovery')]
 class SalesChannelDomainProvider extends AbstractSalesChannelDomainProvider
 {
     public function __construct(
@@ -36,7 +36,7 @@ class SalesChannelDomainProvider extends AbstractSalesChannelDomainProvider
         );
 
         $collection = array_map(
-            fn ($domain) => SalesChannelDomain::create($domain['sales_channel_id'], $domain['url']),
+            static fn ($domain) => SalesChannelDomain::create($domain['sales_channel_id'], $domain['url']),
             $result
         );
 

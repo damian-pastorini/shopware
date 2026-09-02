@@ -22,7 +22,9 @@ class IncrementRedisStorage extends AbstractIncrementStorage
      * @param EntityRepository<NumberRangeCollection> $numberRangeRepository
      */
     public function __construct(
-        /** @phpstan-ignore shopware.propertyNativeType (Cannot type natively, as Symfony might change the implementation in the future) */
+        /**
+         * @phpstan-ignore shopware.propertyNativeType (Cannot type natively, as Symfony might change the implementation in the future)
+         */
         private $redis,
         private readonly LockFactory $lockFactory,
         private readonly EntityRepository $numberRangeRepository
@@ -116,6 +118,29 @@ class IncrementRedisStorage extends AbstractIncrementStorage
     public function set(string $configurationId, int $value): void
     {
         $this->redis->set($this->getKey($configurationId), $value);
+    }
+
+    public function increaseToAtLeast(string $configurationId, int $value): void
+    {
+        $key = $this->getKey($configurationId);
+        $lock = $this->lockFactory->createLock('number-range-' . $configurationId);
+        if (!$lock->acquire(true)) {
+            return;
+        }
+
+        try {
+            $currentValue = $this->redis->get($key);
+            $currentValue = $currentValue === false || $currentValue === null ? 0 : (int) $currentValue;
+
+            $increment = $value - $currentValue;
+            if ($increment <= 0) {
+                return;
+            }
+
+            $this->redis->incrBy($key, $increment); // @phpstan-ignore-line - because multiple redis implementations phpStan doesn't like this
+        } finally {
+            $lock->release();
+        }
     }
 
     public function getDecorated(): AbstractIncrementStorage

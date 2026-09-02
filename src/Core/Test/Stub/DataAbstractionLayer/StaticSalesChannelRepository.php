@@ -2,6 +2,7 @@
 
 namespace Shopware\Core\Test\Stub\DataAbstractionLayer;
 
+use Shopware\Core\Framework\DataAbstractionLayer\Entity;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityCollection;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityDefinition;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\AggregationResult\AggregationResultCollection;
@@ -66,7 +67,7 @@ class StaticSalesChannelRepository extends SalesChannelRepository
         if ($result instanceof EntityCollection) {
             /** @var TEntityCollection $result */
             return new EntitySearchResult(
-                $this->getDummyEntityName(),
+                $this->getDummyEntityName($result),
                 $result->count(),
                 $result,
                 null,
@@ -111,7 +112,7 @@ class StaticSalesChannelRepository extends SalesChannelRepository
 
         // flat array of ids
         if (\array_key_exists(0, $result) && \is_string($result[0])) {
-            $result = \array_map(fn (string $id) => ['primaryKey' => $id, 'data' => []], $result);
+            $result = \array_map(static fn (string $id) => ['primaryKey' => $id, 'data' => []], $result);
         }
 
         return new IdSearchResult(\count($result), $result, $criteria, $salesChannelContext->getContext());
@@ -122,8 +123,11 @@ class StaticSalesChannelRepository extends SalesChannelRepository
         throw new \Exception('Aggregate is not implemented in static repository');
     }
 
-    private function getDummyEntityName(): string
+    /**
+     * @param EntityCollection<Entity>|null $entities
+     */
+    private function getDummyEntityName(?EntityCollection $entities = null): string
     {
-        return $this->definition?->getEntityName() ?? 'mock';
+        return $this->definition?->getEntityName() ?? $entities?->first()?->getApiAlias() ?? 'mock';
     }
 }

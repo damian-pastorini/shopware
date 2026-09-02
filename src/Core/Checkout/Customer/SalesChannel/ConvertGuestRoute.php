@@ -9,9 +9,9 @@ use Shopware\Core\Checkout\Customer\Validation\Constraint\CustomerEmailUnique;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Plugin\Exception\DecorationPatternException;
+use Shopware\Core\Framework\RateLimiter\RateLimiter;
 use Shopware\Core\Framework\Routing\StoreApiRouteScope;
 use Shopware\Core\Framework\Validation\BuildValidationEvent;
-use Shopware\Core\Framework\Validation\DataBag\DataBag;
 use Shopware\Core\Framework\Validation\DataBag\RequestDataBag;
 use Shopware\Core\Framework\Validation\DataValidationDefinition;
 use Shopware\Core\Framework\Validation\DataValidationFactoryInterface;
@@ -19,11 +19,18 @@ use Shopware\Core\Framework\Validation\DataValidator;
 use Shopware\Core\PlatformRequest;
 use Shopware\Core\System\SalesChannel\SalesChannelContext;
 use Shopware\Core\System\SalesChannel\SuccessResponse;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
-#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [StoreApiRouteScope::ID], '_contextTokenRequired' => true])]
 #[Package('checkout')]
+#[Route(
+    defaults: [
+        PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [StoreApiRouteScope::ID],
+        PlatformRequest::ATTRIBUTE_CONTEXT_TOKEN_REQUIRED => true,
+    ]
+)]
 class ConvertGuestRoute extends AbstractConvertGuestRoute
 {
     /**
@@ -36,6 +43,8 @@ class ConvertGuestRoute extends AbstractConvertGuestRoute
         private readonly EventDispatcherInterface $eventDispatcher,
         private readonly DataValidator $validator,
         private readonly DataValidationFactoryInterface $passwordValidationFactory,
+        private readonly RequestStack $requestStack,
+        private readonly RateLimiter $rateLimiter
     ) {
     }
 
@@ -44,28 +53,47 @@ class ConvertGuestRoute extends AbstractConvertGuestRoute
         throw new DecorationPatternException(self::class);
     }
 
-    #[Route(path: '/store-api/account/convert-guest', name: 'store-api.account.convert-guest', methods: ['POST'], defaults: ['_loginRequired' => true, '_loginRequiredAllowGuest' => true])]
-    public function convertGuest(RequestDataBag $requestDataBag, SalesChannelContext $context, CustomerEntity $customer, ?DataValidationDefinition $additionalValidationDefinitions = null): SuccessResponse
-    {
+    #[Route(
+        path: '/store-api/account/convert-guest',
+        name: 'store-api.account.convert-guest',
+        defaults: [
+            PlatformRequest::ATTRIBUTE_LOGIN_REQUIRED => true,
+            PlatformRequest::ATTRIBUTE_LOGIN_REQUIRED_ALLOW_GUEST => true,
+        ],
+        methods: [Request::METHOD_POST]
+    )]
+    public function convertGuest(
+        RequestDataBag $requestDataBag,
+        SalesChannelContext $context,
+        CustomerEntity $customer,
+        ?DataValidationDefinition $additionalValidationDefinitions = null
+    ): SuccessResponse {
         if (!$customer->getGuest()) {
             throw CustomerException::registeredCustomerCannotBeConverted($customer->getId());
         }
 
-        $customerData = [
-            'id' => $customer->getId(),
+        if ($this->requestStack->getMainRequest() !== null) {
+            $this->rateLimiter->ensureAccepted(RateLimiter::GUEST_LOGIN, $customer->getId());
+        }
+
+        $requestDataBag->add([
             'email' => $customer->getEmail(),
-            'guest' => false,
-            'password' => $requestDataBag->get('password'),
-        ];
+        ]);
+        $this->validate($requestDataBag, $context, $additionalValidationDefinitions);
 
-        $this->validate(new DataBag($customerData), $context, $additionalValidationDefinitions);
-
-        $this->customerRepository->update([$customerData], $context->getContext());
+        $this->customerRepository->update([
+            [
+                'id' => $customer->getId(),
+                'email' => $customer->getEmail(),
+                'guest' => false,
+                'password' => $requestDataBag->get('password'),
+            ],
+        ], $context->getContext());
 
         return new SuccessResponse();
     }
 
-    private function validate(DataBag $data, SalesChannelContext $context, ?DataValidationDefinition $additionalValidationDefinitions = null): void
+    private function validate(RequestDataBag $data, SalesChannelContext $context, ?DataValidationDefinition $additionalValidationDefinitions = null): void
     {
         $definition = new DataValidationDefinition('customer.guest.convert');
         $definition->merge($this->passwordValidationFactory->create($context));

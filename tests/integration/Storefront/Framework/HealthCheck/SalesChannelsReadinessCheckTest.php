@@ -3,10 +3,10 @@
 namespace Shopware\Tests\Integration\Storefront\Framework\HealthCheck;
 
 use Doctrine\DBAL\Connection;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Shopware\Core\Defaults;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\SystemCheck\Check\Status;
 use Shopware\Core\Framework\Test\TestCaseBase\CacheTestBehaviour;
 use Shopware\Core\Framework\Test\TestCaseBase\DatabaseTransactionBehaviour;
@@ -23,7 +23,7 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * @internal
  */
-#[CoversClass(SalesChannelsReadinessCheck::class)]
+#[Package('discovery')]
 class SalesChannelsReadinessCheckTest extends TestCase
 {
     use CacheTestBehaviour;
@@ -164,16 +164,16 @@ class SalesChannelsReadinessCheckTest extends TestCase
     private function initUtilMock(SalesChannelDomainUtil&MockObject $util): void
     {
         $util->method('runAsSalesChannelRequest')
-            ->willReturnCallback(function (callable $callback): mixed {
+            ->willReturnCallback(static function (callable $callback): mixed {
                 return $callback();
             });
 
         $util->method('runWhileTrustingAllHosts')
-            ->willReturnCallback(function (callable $callback): mixed {
+            ->willReturnCallback(static function (callable $callback): mixed {
                 return $callback();
             });
 
-        $util->method('generateDomainUrl')->willReturnCallback(function ($domain, $routeName) {
+        $util->method('generateDomainUrl')->willReturnCallback(static function ($domain, $routeName) {
             return $domain . $routeName;
         });
     }

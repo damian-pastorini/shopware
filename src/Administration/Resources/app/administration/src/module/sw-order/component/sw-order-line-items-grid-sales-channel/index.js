@@ -104,14 +104,14 @@ export default {
 
         unitPriceLabel() {
             if (this.taxStatus === 'net') {
-                return this.$tc('sw-order.createBase.columnPriceNet');
+                return this.$t('sw-order.createBase.columnPriceNet');
             }
 
             if (this.taxStatus === 'tax-free') {
-                return this.$tc('sw-order.createBase.columnPriceTaxFree');
+                return this.$t('sw-order.createBase.columnPriceTaxFree');
             }
 
-            return this.$tc('sw-order.createBase.columnPriceGross');
+            return this.$t('sw-order.createBase.columnPriceGross');
         },
 
         getLineItemColumns() {
@@ -119,7 +119,7 @@ export default {
                 {
                     property: 'quantity',
                     dataIndex: 'quantity',
-                    label: this.$tc('sw-order.createBase.columnQuantity'),
+                    label: this.$t('sw-order.createBase.columnQuantity'),
                     allowResize: false,
                     align: 'right',
                     inlineEdit: true,
@@ -128,7 +128,7 @@ export default {
                 {
                     property: 'label',
                     dataIndex: 'label',
-                    label: this.$tc('sw-order.createBase.columnProductName'),
+                    label: this.$t('sw-order.createBase.columnProductName'),
                     allowResize: false,
                     primary: true,
                     inlineEdit: true,
@@ -148,7 +148,7 @@ export default {
             if (this.taxStatus !== 'tax-free') {
                 columnDefinitions.push({
                     property: 'tax',
-                    label: this.$tc('sw-order.createBase.columnTax'),
+                    label: this.$t('sw-order.createBase.columnTax'),
                     allowResize: false,
                     align: 'right',
                     inlineEdit: true,
@@ -163,8 +163,8 @@ export default {
                     dataIndex: 'totalPrice',
                     label:
                         this.taxStatus === 'gross'
-                            ? this.$tc('sw-order.createBase.columnTotalPriceGross')
-                            : this.$tc('sw-order.createBase.columnTotalPriceNet'),
+                            ? this.$t('sw-order.createBase.columnTotalPriceGross')
+                            : this.$t('sw-order.createBase.columnTotalPriceNet'),
                     allowResize: false,
                     align: 'right',
                     width: '80px',
@@ -192,8 +192,9 @@ export default {
 
         onInlineEditCancel(item) {
             if (item._isNew) {
-                this.initLineItem(item);
-                delete item.identifier;
+                Store.get('swOrder').removeEmptyLineItem(item.id);
+
+                return;
             }
 
             // Reset quantity
@@ -235,24 +236,30 @@ export default {
         onInsertExistingItem() {
             const item = this.createNewOrderLineItem();
             item.type = this.lineItemTypes.PRODUCT;
-            this.cartLineItems.unshift(item);
-            Store.get('swOrder').setCartLineItems(this.cartLineItems);
+            this.insertLineItem(item);
         },
 
         onInsertBlankItem() {
             const item = this.createNewOrderLineItem();
             item.description = 'custom line item';
             item.type = this.lineItemTypes.CUSTOM;
-            this.cartLineItems.unshift(item);
-            Store.get('swOrder').setCartLineItems(this.cartLineItems);
+            this.insertLineItem(item);
         },
 
         onInsertCreditItem() {
             const item = this.createNewOrderLineItem();
             item.description = 'credit line item';
             item.type = this.lineItemTypes.CREDIT;
+            this.insertLineItem(item);
+        },
+
+        insertLineItem(item) {
             this.cartLineItems.unshift(item);
             Store.get('swOrder').setCartLineItems(this.cartLineItems);
+
+            this.$nextTick(() => {
+                this.$refs.dataGrid?.onDbClickCell(item);
+            });
         },
 
         onSelectionChanged(selection) {
@@ -301,6 +308,27 @@ export default {
             return item.type === this.lineItemTypes.PRODUCT;
         },
 
+        getProductRouteId(item) {
+            return item.identifier || item.referencedId || item.id;
+        },
+
+        canOpenProduct(item) {
+            return this.isProductItem(item) && !!item.payload && !!this.getProductRouteId(item);
+        },
+
+        getProductRoute(item) {
+            if (!this.canOpenProduct(item)) {
+                return null;
+            }
+
+            return {
+                name: 'sw.product.detail',
+                params: {
+                    id: this.getProductRouteId(item),
+                },
+            };
+        },
+
         getMinItemPrice(item) {
             if (this.isCreditItem(item)) {
                 return null;
@@ -318,7 +346,7 @@ export default {
 
         showTaxValue(item) {
             return (this.isCreditItem(item) || this.isPromotionItem(item)) && item.price.taxRules.length > 1
-                ? this.$tc('sw-order.createBase.textCreditTax')
+                ? this.$t('sw-order.createBase.textCreditTax')
                 : `${item.price.taxRules[0].taxRate} %`;
         },
 
@@ -337,7 +365,7 @@ export default {
             });
 
             const decorateTaxes = sortTaxes.map((taxItem) => {
-                return this.$tc(
+                return this.$t(
                     'sw-order.createBase.taxDetail',
                     {
                         taxRate: taxItem.taxRate,
@@ -349,7 +377,7 @@ export default {
 
             return {
                 showDelay: 300,
-                message: `${this.$tc('sw-order.createBase.tax')}<br>${decorateTaxes.join('<br>')}`,
+                message: `${this.$t('sw-order.createBase.tax')}<br>${decorateTaxes.join('<br>')}`,
             };
         },
 

@@ -2,9 +2,9 @@
  * @sw-package after-sales
  */
 
-/* eslint-disable max-len, sw-deprecation-rules/private-feature-declarations */
+/* eslint-disable sw-deprecation-rules/private-feature-declarations */
 Shopware.Component.register('sw-settings-newsletter', () => import('./page/sw-settings-newsletter'));
-/* eslint-enable max-len, sw-deprecation-rules/private-feature-declarations */
+/* eslint-enable sw-deprecation-rules/private-feature-declarations */
 
 const { Module } = Shopware;
 
@@ -18,7 +18,7 @@ Module.register('sw-settings-newsletter', {
     targetVersion: '1.0.0',
     color: '#9AA8B5',
     icon: 'regular-cog',
-    favicon: 'icon-module-settings.png',
+    favicon: 'icon-module-settings.svg',
 
     routes: {
         index: {

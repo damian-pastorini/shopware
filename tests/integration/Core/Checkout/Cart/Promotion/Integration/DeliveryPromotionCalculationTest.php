@@ -27,7 +27,6 @@ use Shopware\Core\Test\TestDefaults;
  * @internal
  */
 #[Package('checkout')]
-#[Group('slow')]
 class DeliveryPromotionCalculationTest extends TestCase
 {
     use IntegrationTestBehaviour;
@@ -632,7 +631,7 @@ class DeliveryPromotionCalculationTest extends TestCase
             $data[]['id'] = $id;
         }
 
-        if (\count($data) === 0) {
+        if ($data === []) {
             return;
         }
         $this->promotionRepository->delete($data, $this->context->getContext());

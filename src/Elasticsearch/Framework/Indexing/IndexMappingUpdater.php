@@ -3,8 +3,8 @@
 namespace Shopware\Elasticsearch\Framework\Indexing;
 
 use OpenSearch\Client;
-use OpenSearch\Common\Exceptions\BadRequest400Exception;
-use OpenSearch\Common\Exceptions\Missing404Exception;
+use OpenSearch\Exception\BadRequestHttpException;
+use OpenSearch\Exception\NotFoundHttpException;
 use Shopware\Core\Framework\Adapter\Storage\AbstractKeyValueStorage;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\Log\Package;
@@ -16,6 +16,20 @@ use Shopware\Elasticsearch\Product\ElasticsearchProductException;
 #[Package('framework')]
 class IndexMappingUpdater
 {
+    /**
+     * putMapping errors that cannot be resolved on a live index; the affected entity has to
+     * be reindexed into a freshly created index instead. This includes analysis-settings
+     * mismatches ("has not been configured in mappings"), because analyzers/normalizers are
+     * fixed at index creation and cannot be added to a live index.
+     */
+    private const REINDEXABLE_MAPPING_ERRORS = [
+        'conflicts with existing mapper:\n\tCannot update parameter',
+        'cannot be changed from type',
+        'can\'t merge a non object mapping',
+        'cannot change object mapping from',
+        'has not been configured in mappings',
+    ];
+
     /**
      * @internal
      */
@@ -45,27 +59,35 @@ class IndexMappingUpdater
         }
 
         foreach ($this->registry->getDefinitions() as $definition) {
-            $indexName = $this->elasticsearchHelper->getIndexName($definition->getEntityDefinition());
+            $entityDefinition = $definition->getEntityDefinition();
+            $indexName = $this->elasticsearchHelper->getIndexName($entityDefinition);
 
             try {
                 $this->client->indices()->putMapping([
                     'index' => $indexName,
                     'body' => $this->indexMappingProvider->build($definition, $context),
                 ]);
-            } catch (BadRequest400Exception $exception) {
-                if (str_contains($exception->getMessage(), 'cannot be changed from type') || str_contains($exception->getMessage(), 'can\'t merge a non object mapping')) {
-                    $entitiesToReindex[] = $definition->getEntityDefinition()->getEntityName();
+            } catch (BadRequestHttpException $exception) {
+                $errorMessage = $exception->getMessage();
 
-                    $exception = ElasticsearchProductException::cannotChangeFieldType($exception);
+                // These putMapping errors cannot be resolved on a live index, so the entity is
+                // scheduled for a reindex into a freshly created index.
+                foreach (self::REINDEXABLE_MAPPING_ERRORS as $needle) {
+                    if (str_contains($errorMessage, $needle)) {
+                        $entitiesToReindex[] = $entityDefinition->getEntityName();
+                        $exception = ElasticsearchProductException::cannotChangeFieldType($exception);
+
+                        break;
+                    }
                 }
 
                 $this->elasticsearchHelper->logAndThrowException($exception);
-            } catch (Missing404Exception $exception) {
+            } catch (NotFoundHttpException $exception) {
                 $this->elasticsearchHelper->logAndThrowException($exception);
             }
         }
 
-        if (!empty($entitiesToReindex)) {
+        if ($entitiesToReindex !== []) {
             $this->storage->set(SystemUpdateListener::CONFIG_KEY, \array_values(\array_unique($entitiesToReindex)));
         }
     }

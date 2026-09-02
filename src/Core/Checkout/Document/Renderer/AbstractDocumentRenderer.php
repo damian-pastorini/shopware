@@ -52,7 +52,7 @@ abstract class AbstractDocumentRenderer
      */
     protected function isAllowIntraCommunityDelivery(array $config, OrderEntity $order): bool
     {
-        if (empty($config['displayAdditionalNoteDelivery'])) {
+        if (($config['displayAdditionalNoteDelivery'] ?? false) === false) {
             return false;
         }
 
@@ -99,9 +99,7 @@ abstract class AbstractDocumentRenderer
             return false;
         }
 
-        $shippingAddress = $orderDelivery->getShippingOrderAddress();
-
-        $country = $shippingAddress?->getCountry();
+        $country = $orderDelivery->getShippingOrderAddress()?->getCountry();
         if ($country === null) {
             return false;
         }

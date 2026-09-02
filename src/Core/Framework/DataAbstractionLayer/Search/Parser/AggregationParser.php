@@ -193,21 +193,26 @@ class AggregationParser
     {
         $name = \array_key_exists('name', $aggregation) ? (string) $aggregation['name'] : null;
 
-        if (empty($name) || is_numeric($name)) {
+        if ($name === null || $name === '' || is_numeric($name)) {
             $exceptions->add(DataAbstractionLayerException::invalidAggregationQuery('The aggregation name should be a non-empty string.'), '/aggregations/' . $index);
 
             return null;
         }
 
-        if (str_contains($name, '?') || str_contains($name, ':')) {
-            $exceptions->add(DataAbstractionLayerException::invalidAggregationQuery('The aggregation name should not contain a question mark or colon.'), '/aggregations/' . $index);
+        if (
+            str_contains($name, '?')
+            || str_contains($name, ':')
+            // https://www.php.net/manual/en/regexp.reference.unicode.php
+            || preg_match('/\p{Cc}/u', $name) === 1
+        ) {
+            $exceptions->add(DataAbstractionLayerException::invalidAggregationQuery('The aggregation name should not contain a question mark, colon, or control character.'), '/aggregations/' . $index);
 
             return null;
         }
 
         $type = $aggregation['type'] ?? null;
 
-        if (!\is_string($type) || empty($type) || is_numeric($type)) {
+        if (!\is_string($type) || $type === '' || is_numeric($type)) {
             $exceptions->add(DataAbstractionLayerException::invalidAggregationQuery('The aggregations of "%s" should be a non-empty string.'), '/aggregations/' . $index);
 
             return null;

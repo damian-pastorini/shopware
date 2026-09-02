@@ -14,6 +14,7 @@ use Shopware\Core\Framework\Adapter\Translation\AbstractTranslator;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\EntitySearchResult;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\Test\Generator;
 use Shopware\Core\Test\Stub\EventDispatcher\CollectingEventDispatcher;
@@ -28,6 +29,7 @@ use Symfony\Component\HttpFoundation\Request;
 /**
  * @internal
  */
+#[Package('checkout')]
 #[CoversClass(AccountOrderPageLoader::class)]
 class AccountOrderPageLoaderTest extends TestCase
 {
@@ -80,7 +82,7 @@ class AccountOrderPageLoaderTest extends TestCase
             ->expects($this->once())
             ->method('load')
             ->with(
-                static::callback(fn (Request $request) => $request->query->get('email') === 'test@example.com' && $request->query->get('zipcode') === '12345' && $request->query->get('login') === true),
+                static::callback(static fn (Request $request) => $request->query->get('email') === 'test@example.com' && $request->query->get('zipcode') === '12345' && $request->query->get('login') === true),
                 $context,
                 static::isInstanceOf(Criteria::class),
             )
@@ -102,7 +104,7 @@ class AccountOrderPageLoaderTest extends TestCase
 
         $page = $this->pageLoader->load(new Request(['email' => 'test@example.com', 'zipcode' => '12345']), $context);
 
-        static::assertSame($order, $page->getOrders()->first());
+        static::assertSame($order, $page->getOrders()->getEntities()->first());
         $metaInformation = $page->getMetaInformation();
         static::assertNotNull($metaInformation);
         static::assertSame('translated | testshop', $metaInformation->getMetaTitle());

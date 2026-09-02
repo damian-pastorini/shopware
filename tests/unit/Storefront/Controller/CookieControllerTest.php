@@ -8,6 +8,7 @@ use Shopware\Core\Content\Cookie\SalesChannel\AbstractCookieRoute;
 use Shopware\Core\Content\Cookie\SalesChannel\CookieRouteResponse;
 use Shopware\Core\Content\Cookie\Struct\CookieGroup;
 use Shopware\Core\Content\Cookie\Struct\CookieGroupCollection;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Test\Generator;
 use Shopware\Storefront\Controller\CookieController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -16,6 +17,7 @@ use Symfony\Component\HttpFoundation\Request;
 /**
  * @internal
  */
+#[Package('discovery')]
 #[CoversClass(CookieController::class)]
 class CookieControllerTest extends TestCase
 {
@@ -33,7 +35,7 @@ class CookieControllerTest extends TestCase
         $cookieRoute->expects($this->once())
             ->method('getCookieGroups')
             ->with($request, $salesChannelContext)
-            ->willReturn(new CookieRouteResponse($cookieGroups, 'test-hash'));
+            ->willReturn(new CookieRouteResponse($cookieGroups, 'test-hash', 'test-language-id'));
 
         $controller = new CookieControllerTestClass($cookieRoute);
 
@@ -77,7 +79,7 @@ class CookieControllerTest extends TestCase
         $cookieRoute->expects($this->once())
             ->method('getCookieGroups')
             ->with($request, $salesChannelContext)
-            ->willReturn(new CookieRouteResponse($cookieGroups, 'test-hash'));
+            ->willReturn(new CookieRouteResponse($cookieGroups, 'test-hash', 'test-language-id'));
 
         $controller = new CookieControllerTestClass($cookieRoute);
 
@@ -99,9 +101,9 @@ class CookieControllerTest extends TestCase
         $cookieGroup->description = 'Test description';
         $cookieGroups = new CookieGroupCollection([$cookieGroup]);
 
-        $cookieRoute = $this->createMock(AbstractCookieRoute::class);
+        $cookieRoute = static::createStub(AbstractCookieRoute::class);
         $cookieRoute->method('getCookieGroups')
-            ->willReturn(new CookieRouteResponse($cookieGroups, 'test-hash'));
+            ->willReturn(new CookieRouteResponse($cookieGroups, 'test-hash', 'test-language-id'));
 
         $controller = new CookieControllerTestClass($cookieRoute);
 
@@ -118,7 +120,7 @@ class CookieControllerTest extends TestCase
         $request = new Request();
         $salesChannelContext = Generator::generateSalesChannelContext();
 
-        $cookieRoute = $this->createMock(AbstractCookieRoute::class);
+        $cookieRoute = static::createStub(AbstractCookieRoute::class);
         $controller = new CookieControllerTestClass($cookieRoute);
 
         $response = $controller->cookieConsentOffcanvas($request, $salesChannelContext);
@@ -135,7 +137,7 @@ class CookieControllerTest extends TestCase
         $request = new Request(['featureName' => 'customFeature', 'cookieName' => 'custom-cookie']);
         $salesChannelContext = Generator::generateSalesChannelContext();
 
-        $cookieRoute = $this->createMock(AbstractCookieRoute::class);
+        $cookieRoute = static::createStub(AbstractCookieRoute::class);
         $controller = new CookieControllerTestClass($cookieRoute);
 
         $response = $controller->cookieConsentOffcanvas($request, $salesChannelContext);
@@ -160,13 +162,13 @@ class CookieControllerTest extends TestCase
         $cookieRoute->expects($this->once())
             ->method('getCookieGroups')
             ->with($request, $salesChannelContext)
-            ->willReturn(new CookieRouteResponse($cookieGroups, 'test-hash'));
+            ->willReturn(new CookieRouteResponse($cookieGroups, 'test-hash', 'test-language-id'));
 
         $controller = new CookieControllerTestClass($cookieRoute);
 
         // Override the json method to capture the data being passed to it
         $jsonData = null;
-        $controller->jsonCallback = function ($data) use (&$jsonData) {
+        $controller->jsonCallback = static function ($data) use (&$jsonData) {
             $jsonData = $data;
 
             return new JsonResponse($data);

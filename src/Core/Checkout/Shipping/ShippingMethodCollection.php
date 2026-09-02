@@ -11,6 +11,10 @@ use Shopware\Core\System\SalesChannel\SalesChannelContext;
 
 /**
  * @extends EntityCollection<ShippingMethodEntity>
+ *
+ * @codeCoverageIgnore
+ *
+ * @see \Shopware\Tests\Integration\Storefront\Page\Checkout\CartPageTest
  */
 #[Package('checkout')]
 class ShippingMethodCollection extends EntityCollection
@@ -26,7 +30,7 @@ class ShippingMethodCollection extends EntityCollection
         );
 
         return $this->filter(
-            function (ShippingMethodEntity $shippingMethod) use ($salesChannelContext) {
+            static function (ShippingMethodEntity $shippingMethod) use ($salesChannelContext) {
                 if ($shippingMethod->getAvailabilityRuleId() === null) {
                     return true;
                 }

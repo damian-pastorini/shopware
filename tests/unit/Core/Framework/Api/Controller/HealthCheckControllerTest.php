@@ -11,6 +11,7 @@ use Shopware\Core\Framework\Api\Controller\HealthCheckController;
 use Shopware\Core\Framework\Api\HealthCheck\Event\HealthCheckEvent;
 use Shopware\Core\Framework\Api\OAuth\SymfonyBearerTokenValidator;
 use Shopware\Core\Framework\Context;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\SystemCheck\Check\Result;
 use Shopware\Core\Framework\SystemCheck\Check\Status;
 use Shopware\Core\Framework\SystemCheck\SystemChecker;
@@ -21,6 +22,7 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * @internal
  */
+#[Package('framework')]
 #[CoversClass(HealthCheckController::class)]
 class HealthCheckControllerTest extends TestCase
 {
@@ -31,6 +33,8 @@ class HealthCheckControllerTest extends TestCase
     public function testCheck(): void
     {
         $controller = $this->createHealthCheckController();
+        $this->systemChecker->expects($this->never())->method('check');
+
         $response = $controller->check(Context::createDefaultContext());
 
         static::assertSame(Response::HTTP_OK, $response->getStatusCode());
@@ -74,14 +78,16 @@ class HealthCheckControllerTest extends TestCase
                 ],
             ],
         ];
-        static::assertIsString($response->getContent());
-        static::assertIsString(json_encode($expectedResponse));
-        static::assertJsonStringEqualsJsonString(json_encode($expectedResponse), $response->getContent());
+        $content = $response->getContent();
+        static::assertIsString($content);
+        static::assertJsonStringEqualsJsonString(json_encode($expectedResponse, \JSON_THROW_ON_ERROR), $content);
     }
 
     public function testEventIsDispatched(): void
     {
         $controller = $this->createHealthCheckController();
+        $this->systemChecker->expects($this->never())->method('check');
+
         $response = $controller->check(Context::createDefaultContext());
 
         static::assertCount(1, $this->eventDispatcher->getEvents());
@@ -98,13 +104,15 @@ class HealthCheckControllerTest extends TestCase
         ?string $validBearer = null
     ): void {
         $controller = $this->createHealthCheckController($staticToken, $validBearer);
-        $request = Request::create('', 'GET', []);
+        $this->systemChecker->expects($expectedOAuthServerException ? $this->never() : $this->once())
+            ->method('check');
+        $request = Request::create('');
         if ($headerValue !== null) {
             $request->headers->set(HealthCheckController::HEADER_AUTHORIZATION, $headerValue);
         }
 
         if ($expectedOAuthServerException) {
-            static::expectException(OAuthServerException::class);
+            $this->expectException(OAuthServerException::class);
         }
 
         $response = $controller->health($request);
@@ -170,9 +178,9 @@ class HealthCheckControllerTest extends TestCase
         $this->eventDispatcher = new CollectingEventDispatcher();
         $this->systemChecker = $this->createMock(SystemChecker::class);
 
-        $tokenValidator = $this->createMock(SymfonyBearerTokenValidator::class);
+        $tokenValidator = static::createStub(SymfonyBearerTokenValidator::class);
         $tokenValidator->method('validateAuthorization')->willReturnCallback(
-            function (Request $request) use ($validBearer): void {
+            static function (Request $request) use ($validBearer): void {
                 // simplified mock of original implementation in src/Core/Framework/Api/OAuth/SymfonyBearerTokenValidator.php
                 if ($request->headers->has(HealthCheckController::HEADER_AUTHORIZATION) === false) {
                     throw OAuthServerException::accessDenied('Missing "Authorization" header');
@@ -181,7 +189,7 @@ class HealthCheckControllerTest extends TestCase
                 $header = $request->headers->get(HealthCheckController::HEADER_AUTHORIZATION, '');
                 $jwt = \trim((string) \preg_replace('/^\s*Bearer\s/', '', $header));
 
-                if (empty($validBearer) || $jwt !== $validBearer) {
+                if ($validBearer === null || $validBearer === '' || $jwt !== $validBearer) {
                     throw OAuthServerException::accessDenied('Access token is invalid');
                 }
             }

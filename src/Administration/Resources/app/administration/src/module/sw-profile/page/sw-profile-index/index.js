@@ -3,6 +3,8 @@
  */
 import { email } from 'src/core/service/validation.service';
 import { KEY_USER_SEARCH_PREFERENCE } from 'src/app/service/search-ranking.service';
+import useTheme from 'src/app/composables/use-theme';
+import useModuleIconColors from 'src/app/composables/use-module-icon-colors';
 import template from './sw-profile-index.html.twig';
 import '../../store/sw-profile.store';
 
@@ -22,8 +24,9 @@ export default {
         'acl',
         'searchPreferencesService',
         'searchRankingService',
-        'userConfigService',
         'ssoSettingsService',
+        'validationApiService',
+        'feature',
     ],
 
     mixins: [
@@ -47,6 +50,8 @@ export default {
             mediaDefaultFolderId: null,
             showMediaModal: false,
             timezoneOptions: [],
+            userTheme: useTheme().theme.value,
+            userModuleIconColors: useModuleIconColors().enabled.value,
         };
     },
 
@@ -101,6 +106,24 @@ export default {
 
         languageId() {
             return Shopware.Store.get('session').languageId;
+        },
+
+        profileTabs() {
+            const createRouteTab = (label, routeName) => {
+                return {
+                    label: this.$t(label),
+                    name: routeName,
+                    onClick: () => {
+                        void this.$router.push({ name: routeName });
+                    },
+                };
+            };
+
+            return [
+                createRouteTab('sw-profile.tabGeneral.title', 'sw.profile.index.general'),
+                createRouteTab('sw-profile.tabSearchPreferences.title', 'sw.profile.index.searchPreferences'),
+                createRouteTab('sw-profile.tabPrivacyPreferences.title', 'sw.profile.index.privacyPreferences'),
+            ];
         },
     },
 
@@ -251,28 +274,35 @@ export default {
                 return;
             }
 
-            this.ssoSettingsService.isSso().then((response) => {
+            this.ssoSettingsService.isSso().then(async (response) => {
                 if (response.isSso) {
                     this.saveUser();
 
                     return;
                 }
 
-                if (this.checkEmail() === false) {
+                const isValid = await this.validationApiService.validateEmailAddress(this.user.email);
+
+                if (isValid) {
+                    const passwordCheck = this.checkPassword();
+                    if (passwordCheck === null || passwordCheck === true) {
+                        this.confirmPasswordModal = true;
+                    }
+
                     return;
                 }
 
-                const passwordCheck = this.checkPassword();
-
-                if (passwordCheck === null || passwordCheck === true) {
-                    this.confirmPasswordModal = true;
-                }
+                this.createErrorMessage(this.$t('sw-profile.index.notificationInvalidEmailErrorMessage'));
             });
         },
 
+        /**
+         * @deprecated tag:v6.8.0 - Will be removed.
+         * @returns {boolean}
+         */
         checkEmail() {
             if (!this.user.email || !email(this.user.email)) {
-                this.createErrorMessage(this.$tc('sw-profile.index.notificationInvalidEmailErrorMessage'));
+                this.createErrorMessage(this.$t('sw-profile.index.notificationInvalidEmailErrorMessage'));
 
                 return false;
             }
@@ -282,7 +312,7 @@ export default {
         checkPassword() {
             if (this.newPassword && this.newPassword.length > 0) {
                 if (this.newPassword !== this.newPasswordConfirm) {
-                    this.createErrorMessage(this.$tc('sw-profile.index.notificationPasswordErrorMessage'));
+                    this.createErrorMessage(this.$t('sw-profile.index.notificationPasswordErrorMessage'));
                     return false;
                 }
 
@@ -310,7 +340,18 @@ export default {
                 this.userService
                     .updateUser(changes.changeset[0].changes)
                     .then(async () => {
+                        if (this.newPassword) {
+                            try {
+                                await this.loginService.loginByUsername(this.user.username, this.newPassword);
+                            } catch {
+                                this.loginService.logout();
+                                return;
+                            }
+                        }
+
                         await this.updateCurrentUser();
+                        await this.saveUserTheme();
+                        await this.saveUserModuleIconColors();
 
                         this.isLoading = false;
                         this.isSaveSuccessful = true;
@@ -318,12 +359,14 @@ export default {
                         Shopware.Service('localeHelper').setLocaleWithId(this.user.localeId);
                     })
                     .catch((error) => {
-                        Shopware.Store.get('error').addApiError({
-                            expression: `user.${this.user?.id}.password`,
-                            error: new Shopware.Classes.ShopwareError(error.response.data.errors[0]),
-                        });
+                        if (error?.response?.data?.errors?.[0]) {
+                            Shopware.Store.get('error').addApiError({
+                                expression: `user.${this.user?.id}.password`,
+                                error: new Shopware.Classes.ShopwareError(error.response.data.errors[0]),
+                            });
+                        }
                         this.createNotificationError({
-                            message: this.$tc('sw-profile.index.notificationSaveErrorMessage'),
+                            message: this.$t('sw-profile.index.notificationSaveErrorMessage'),
                         });
                         this.isLoading = false;
                         this.isSaveSuccessful = false;
@@ -335,26 +378,22 @@ export default {
             this.userRepository
                 .save(this.user, context)
                 .then(async () => {
+                    if (this.newPassword) {
+                        try {
+                            await this.loginService.loginByUsername(this.user.username, this.newPassword);
+                        } catch {
+                            this.loginService.logout();
+                            return;
+                        }
+                    }
+
                     await this.updateCurrentUser();
+                    await this.saveUserTheme();
+                    await this.saveUserModuleIconColors();
                     Shopware.Service('localeHelper').setLocaleWithId(this.user.localeId);
 
-                    if (this.newPassword) {
-                        // re-issue a valid jwt token, as all user tokens were invalidated on password change
-                        this.loginService
-                            .loginByUsername(this.user.username, this.newPassword)
-                            .then(() => {
-                                this.isSaveSuccessful = true;
-                            })
-                            .catch(() => {
-                                this.handleUserSaveError();
-                            })
-                            .finally(() => {
-                                this.isLoading = false;
-                            });
-                    } else {
-                        this.isLoading = false;
-                        this.isSaveSuccessful = true;
-                    }
+                    this.isLoading = false;
+                    this.isSaveSuccessful = true;
 
                     this.confirmPassword = '';
                     this.newPassword = '';
@@ -408,7 +447,7 @@ export default {
         handleUserSaveError() {
             if (this.$route.name.includes('sw.profile.index')) {
                 this.createNotificationError({
-                    message: this.$tc('sw-profile.index.notificationSaveErrorMessage'),
+                    message: this.$t('sw-profile.index.notificationSaveErrorMessage'),
                 });
             }
             this.isLoading = false;
@@ -420,6 +459,30 @@ export default {
 
         onChangeNewPasswordConfirm(newPasswordConfirm) {
             this.newPasswordConfirm = newPasswordConfirm;
+        },
+
+        onChangeUserTheme(userTheme) {
+            this.userTheme = userTheme;
+        },
+
+        onChangeUserModuleIconColors(userModuleIconColors) {
+            this.userModuleIconColors = userModuleIconColors;
+        },
+
+        saveUserTheme() {
+            return useTheme()
+                .saveUserTheme(this.userTheme)
+                .catch(() => {
+                    this.createErrorMessage(this.$t('sw-profile.index.notificationSaveErrorMessage'));
+                });
+        },
+
+        saveUserModuleIconColors() {
+            return useModuleIconColors()
+                .saveUserModuleIconColors(this.userModuleIconColors)
+                .catch(() => {
+                    this.createErrorMessage(this.$t('sw-profile.index.notificationSaveErrorMessage'));
+                });
         },
 
         onMediaSelectionChange([mediaEntity]) {
@@ -436,7 +499,6 @@ export default {
         },
 
         saveUserSearchPreferences() {
-            // eslint-disable-next-line max-len
             this.userSearchPreferences =
                 this.userSearchPreferences ?? this.searchPreferencesService.createUserSearchPreferences();
             this.userSearchPreferences.value = this.searchPreferences.map(({ entityName, _searchable, fields }) => {
@@ -452,7 +514,7 @@ export default {
 
             this.isLoading = true;
             this.isSaveSuccessful = false;
-            return this.userConfigService
+            return Shopware.Service('userConfigService')
                 .upsert({
                     [KEY_USER_SEARCH_PREFERENCE]: this.userSearchPreferences.value,
                 })

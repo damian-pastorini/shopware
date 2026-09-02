@@ -21,6 +21,10 @@ use Shopware\Core\System\NumberRange\DataAbstractionLayer\NumberRangeField;
  * The dbal entity searcher only joins and select fields which defined in sorting, filter or query classes.
  * Fields which are not necessary to determines which ids are affected are not fetched.
  *
+ * @codeCoverageIgnore
+ *
+ * @see \Shopware\Tests\Integration\Core\Framework\DataAbstractionLayer\Search\EntitySearcherTest
+ *
  * @internal
  */
 #[Package('framework')]
@@ -71,11 +75,15 @@ class EntitySearcher implements EntitySearcherInterface
 
         $query = $this->criteriaQueryBuilder->build($query, $definition, $criteria, $context);
 
-        if (!empty($criteria->getIds())) {
+        if ($criteria->getIds() !== []) {
             $this->queryHelper->addIdCondition($criteria, $definition, $query);
         }
 
-        $this->queryHelper->addGroupBy($definition, $criteria, $context, $query, $table);
+        if ($query->hasState(Criteria::SCORE_FIELD) && $criteria->hasState(Criteria::STATE_SCORE_RANKED_GROUPING) && $criteria->getGroupFields() !== []) {
+            $query = $this->buildScoreRankedQuery($query, $definition, $criteria, $context, $table);
+        } else {
+            $this->queryHelper->addGroupBy($definition, $criteria, $context, $query, $table);
+        }
 
         // add pagination
         if ($criteria->getOffset() !== null) {
@@ -145,13 +153,50 @@ class EntitySearcher implements EntitySearcherInterface
         return new IdSearchResult($total, $converted, $criteria, $context);
     }
 
+    /**
+     * Wraps a scored query with ROW_NUMBER() OVER(PARTITION BY ... ORDER BY _score DESC)
+     * to guarantee the highest-scoring row is selected for each group.
+     */
+    private function buildScoreRankedQuery(QueryBuilder $query, EntityDefinition $definition, Criteria $criteria, Context $context, string $table): QueryBuilder
+    {
+        $query->addGroupBy(
+            EntityDefinitionQueryHelper::escape($table) . '.' . EntityDefinitionQueryHelper::escape('id')
+        );
+
+        $partitionColumns = [];
+        foreach (array_values($criteria->getGroupFields()) as $i => $grouping) {
+            $accessor = $this->queryHelper->getFieldAccessor($grouping->getField(), $definition, $table, $context);
+            $alias = '_group_' . $i;
+            $query->addSelect($accessor . ' as `' . $alias . '`');
+            $partitionColumns[] = 'inner_q.`' . $alias . '`';
+        }
+
+        $query->resetOrderBy();
+
+        $innerSql = $query->getSQL();
+
+        $outer = new QueryBuilder($this->connection);
+        $outer->select('ranked.*')
+            ->from(\sprintf(
+                '(SELECT inner_q.*, ROW_NUMBER() OVER(PARTITION BY %s ORDER BY inner_q._score DESC, inner_q.id ASC) as _rn FROM (%s) inner_q)',
+                implode(', ', $partitionColumns),
+                $innerSql
+            ), 'ranked')
+            ->andWhere('ranked._rn = 1')
+            ->addOrderBy('ranked._score', 'DESC');
+
+        $outer->setParameters($query->getParameters(), $query->getParameterTypes());
+
+        return $outer;
+    }
+
     private function addTotalCountMode(Criteria $criteria, QueryBuilder $query): void
     {
         if ($criteria->getTotalCountMode() !== Criteria::TOTAL_COUNT_MODE_NEXT_PAGES) {
             return;
         }
 
-        $query->setMaxResults((int) $criteria->getLimit() * 6 + 1);
+        $query->setMaxResults($criteria->getNextPagesLimit());
     }
 
     /**
@@ -161,6 +206,15 @@ class EntitySearcher implements EntitySearcherInterface
     {
         if ($criteria->getTotalCountMode() !== Criteria::TOTAL_COUNT_MODE_EXACT) {
             return \count($data);
+        }
+
+        $offset = $criteria->getOffset() ?? 0;
+        $isPartialPage = $criteria->getLimit() === null || \count($data) < $criteria->getLimit();
+        // A partial page is the last page, so the fetched rows already determine the exact total and no separate
+        // COUNT(*) query is needed. An empty page with an offset does not: the total could be anything up to the
+        // offset, so fall through to the count query for that case.
+        if ($isPartialPage && ($data !== [] || $offset === 0)) {
+            return $offset + \count($data);
         }
 
         $query->resetOrderBy();

@@ -15,6 +15,7 @@ use Shopware\Core\Framework\DataAbstractionLayer\Search\EntitySearchResult;
 use Shopware\Core\Framework\Demodata\DemodataContext;
 use Shopware\Core\Framework\Demodata\Faker\Commerce;
 use Shopware\Core\Framework\Demodata\Generator\ProductGenerator;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\System\Tax\TaxCollection;
 use Shopware\Core\System\Tax\TaxEntity;
@@ -24,6 +25,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 /**
  * @internal
  */
+#[Package('inventory')]
 #[CoversClass(ProductGenerator::class)]
 class ProductGeneratorTest extends TestCase
 {
@@ -70,9 +72,9 @@ class ProductGeneratorTest extends TestCase
 
         $instantDeliveryId = Uuid::randomHex();
 
-        $connection = $this->createMock(Connection::class);
+        $connection = static::createStub(Connection::class);
         $connection->method('fetchAllAssociative')
-            ->willReturnCallback(function () use ($salesChannelIds, $properties, $categoryIds) {
+            ->willReturnCallback(static function () use ($salesChannelIds, $properties, $categoryIds) {
                 $sqlStatement = \func_get_arg(0);
 
                 if (\str_contains($sqlStatement, 'sales_channel')) {
@@ -92,7 +94,7 @@ class ProductGeneratorTest extends TestCase
         $connection->method('fetchFirstColumn')->willReturn($ruleIds, $manufacturerIds, $tagIds);
         $connection->method('fetchOne')->willReturn($instantDeliveryId);
 
-        $registry = $this->createMock(DefinitionInstanceRegistry::class);
+        $registry = static::createStub(DefinitionInstanceRegistry::class);
 
         $taxEntity = (new TaxEntity())
             ->assign([
@@ -103,7 +105,7 @@ class ProductGeneratorTest extends TestCase
 
         $taxRepository = new StaticEntityRepository([
             new EntitySearchResult(
-                TaxEntity::class,
+                'tax',
                 1,
                 new TaxCollection([$taxEntity]),
                 null,
@@ -133,7 +135,7 @@ class ProductGeneratorTest extends TestCase
 
         $productRepository = new StaticEntityRepository([]);
 
-        $registry->method('getRepository')->willReturnCallback(function () use ($taxRepository, $mediaRepository, &$productRepository) {
+        $registry->method('getRepository')->willReturnCallback(static function () use ($taxRepository, $mediaRepository, &$productRepository) {
             $entityName = \func_get_arg(0);
 
             return match ($entityName) {
@@ -155,7 +157,7 @@ class ProductGeneratorTest extends TestCase
         $generator = Factory::create();
         $generator->addProvider(new Commerce($generator));
 
-        $context = $this->createMock(DemodataContext::class);
+        $context = static::createStub(DemodataContext::class);
         $context->method('getFaker')->willReturn($generator);
 
         $io = $this->createMock(SymfonyStyle::class);
@@ -213,7 +215,7 @@ class ProductGeneratorTest extends TestCase
             static::assertIsInt($product['stock']);
             static::assertIsArray($product['prices']);
 
-            if (\count($product['prices']) > 0) {
+            if ($product['prices'] !== []) {
                 foreach ($product['prices'] as $price) {
                     static::assertContains($price['ruleId'], $ruleIds);
                     static::assertIsInt($price['quantityStart']);
@@ -269,7 +271,7 @@ class ProductGeneratorTest extends TestCase
                 static::assertIsInt($child['stock']);
                 static::assertIsArray($child['prices']);
 
-                if (\count($child['prices']) > 0) {
+                if ($child['prices'] !== []) {
                     foreach ($child['prices'] as $price) {
                         static::assertContains($price['ruleId'], $ruleIds);
                         static::assertIsInt($price['quantityStart']);

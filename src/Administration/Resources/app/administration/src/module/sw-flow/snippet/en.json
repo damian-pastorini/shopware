@@ -169,6 +169,8 @@
         "placeholderDescription": "Enter rule description...",
         "labelType": "Type",
         "placeholderType": "Select rule type...",
+        "deprecatedConditionWarning": "The condition \"{label}\" is deprecated and will be removed in {version}. Please use \"{replacement}\" instead.",
+        "deprecatedConditionWarningNoReplacement": "The condition \"{label}\" is deprecated and will be removed in {version}.",
         "placeholderDelayType": "Select delay..."
       },
       "tag": {
@@ -189,12 +191,19 @@
         "placeholderDeliveryStatus": "Select shipping status...",
         "messageNoStatusError": "At least one status must be selected",
         "forceTransition": "Force status transitions",
-        "forceTransitionHelpText": "Status changes will be made regardless of their starting point and neglecting the usually required transition paths (state machine)."
+        "forceTransitionHelpText": "Status changes will be made regardless of their starting point and neglecting the usually required transition paths (state machine).",
+        "transitionWarning": {
+          "message": "Be careful when using status transitions, as they can lead to failing flows if the status transition isn't valid. Consider enabling \"Force status transitions\" to avoid such issues."
+        }
       },
       "document": {
         "titleCreateDocument": "Generate documents",
         "labelDocumentType": "Documents",
-        "placeholderDocumentType": "Select documents..."
+        "placeholderDocumentType": "Select documents...",
+        "labelDocumentTypeSingle": "Document type",
+        "placeholderDocumentTypeSingle": "Select document type...",
+        "labelFileFormats": "File formats",
+        "placeholderFileFormats": "Select file formats..."
       },
       "downloadAccess": {
         "titleSetDownloadAccess": "Set download access",
@@ -247,6 +256,7 @@
         "labelAdmin": "Admin",
         "labelCustom": "Custom",
         "labelContactFormMail": "Inquirer",
+        "labelRevocationRequestFormMail": "Inquirer",
         "labelRecipient": "Recipient",
         "placeholderRecipient": "Select email recipient...",
         "useDifferentReplyToLabel": "Sender",
@@ -289,7 +299,6 @@
       }
     },
     "leavePageModal": {
-      "headline": "Warning",
       "description": "There are unsaved changes. Are you sure you want to leave this page?",
       "confirmButton": "Leave page"
     },
@@ -301,6 +310,8 @@
       "paymentMethod": "Payment method",
       "contactForm": "Contact form",
       "reviewForm": "Product review",
+      "revocationRequestMerchant": "Revocation request received",
+      "revocationRequestCustomer": "Revocation request sent",
       "group": "Group",
       "recovery": "Recovery",
       "registration": "Registration",
@@ -332,7 +343,6 @@
       "request": "Request",
       "message": "Message",
       "sent": "Sent",
-      "confirm": "Confirm",
       "unsubscribe": "Unsubscribe",
       "log": "Log",
       "cancelled": "Cancelled",
@@ -354,7 +364,8 @@
       "unconfirmed": "Unconfirmed",
       "pending": "Pending",
       "changed": "Changed",
-      "update": "Update"
+      "update": "Update",
+      "password": "Password"
     }
   },
   "sw-privileges": {

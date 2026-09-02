@@ -3,6 +3,7 @@
 namespace Shopware\Tests\Integration\Core\System\NumberRange\Command;
 
 use PHPUnit\Framework\TestCase;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Test\TestCaseBase\IntegrationTestBehaviour;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\System\NumberRange\Command\MigrateIncrementStorageCommand;
@@ -11,10 +12,12 @@ use Shopware\Core\System\NumberRange\ValueGenerator\Pattern\IncrementStorage\Inc
 use Shopware\Core\Test\Stub\System\NumberRange\ValueGenerator\IncrementArrayStorage;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
+use Symfony\Component\DependencyInjection\ServiceLocator;
 
 /**
  * @internal
  */
+#[Package('framework')]
 class MigrateIncrementStorageCommandTest extends TestCase
 {
     use IntegrationTestBehaviour;
@@ -31,12 +34,10 @@ class MigrateIncrementStorageCommandTest extends TestCase
         $this->arrayStorage = new IncrementArrayStorage([]);
 
         $command = new MigrateIncrementStorageCommand(
-            new IncrementStorageRegistry(new \ArrayObject(
-                [
-                    'SQL' => $this->sqlStorage,
-                    'Array' => $this->arrayStorage,
-                ]
-            ), 'SQL')
+            new IncrementStorageRegistry(new ServiceLocator([
+                'SQL' => fn () => $this->sqlStorage,
+                'Array' => fn () => $this->arrayStorage,
+            ]), 'SQL')
         );
 
         $this->tester = new CommandTester($command);

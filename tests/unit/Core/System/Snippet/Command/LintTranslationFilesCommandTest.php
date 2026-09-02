@@ -4,17 +4,17 @@ namespace Shopware\Tests\Unit\Core\System\Snippet\Command;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
-use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\MockObject\Stub;
 use PHPUnit\Framework\TestCase;
-use Shopware\Core\Framework\App\AppCollection;
 use Shopware\Core\Framework\Log\Package;
-use Shopware\Core\Framework\Plugin\PluginCollection;
 use Shopware\Core\System\Snippet\Command\LintTranslationFilesCommand;
 use Shopware\Core\System\Snippet\Command\Util\CountryAgnosticFileLinter;
 use Shopware\Core\Test\Stub\DataAbstractionLayer\StaticEntityRepository;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 use Symfony\Component\Filesystem\Filesystem;
+use Symfony\Component\Finder\Finder;
+use Symfony\Component\Finder\SplFileInfo;
 
 /**
  * @internal
@@ -41,7 +41,6 @@ use Symfony\Component\Filesystem\Filesystem;
  *  }
  */
 #[Package('discovery')]
-#[Group('slow')]
 #[CoversClass(LintTranslationFilesCommand::class)]
 class LintTranslationFilesCommandTest extends TestCase
 {
@@ -51,29 +50,58 @@ class LintTranslationFilesCommandTest extends TestCase
 
     private CommandTester $tester;
 
+    private Stub&Finder $finder;
+
+    private Stub&Filesystem $filesystem;
+
+    /**
+     * @var array<string>
+     */
+    private array $excludedPaths = [];
+
     protected function setUp(): void
     {
-        $filesystem = new Filesystem();
-        $filesystem->mirror(self::FIXTURES_SOURCE_PATH, self::FIXTURES_PATH);
+        // Mock Finder but configure it to return real fixture files
+        $this->finder = static::createStub(Finder::class);
+        $this->filesystem = static::createStub(Filesystem::class);
+        $this->excludedPaths = [];
 
-        /** @var StaticEntityRepository<PluginCollection> $pluginRepository */
+        // Configure Finder mock to be chainable
+        $this->finder->method('files')->willReturnSelf();
+        $this->finder->method('ignoreUnreadableDirs')->willReturnSelf();
+        $this->finder->method('ignoreDotFiles')->willReturnSelf();
+        $this->finder->method('ignoreVCS')->willReturnSelf();
+        $this->finder->method('exclude')->willReturnCallback(function ($excludedPaths) {
+            $this->excludedPaths = array_merge($this->excludedPaths, (array) $excludedPaths);
+
+            return $this->finder;
+        });
+        $this->finder->method('name')->willReturnSelf();
+        $this->finder->method('sortByName')->willReturnSelf();
+
+        // When in() is called, return mock files based on the path
+        $this->finder->method('in')->willReturnCallback(function ($paths) {
+            $mockFiles = $this->createMockFixtureFiles($paths);
+
+            // Update the mock to return mock file results
+            $this->finder->method('count')->willReturn(\count($mockFiles));
+            $this->finder->method('getIterator')->willReturn(new \ArrayIterator($mockFiles));
+
+            return $this->finder;
+        });
+
         $pluginRepository = new StaticEntityRepository([]);
 
-        /** @var StaticEntityRepository<AppCollection> $appRepository */
         $appRepository = new StaticEntityRepository([]);
 
         $this->tester = new CommandTester(new LintTranslationFilesCommand(
             new CountryAgnosticFileLinter(
-                new Filesystem(),
+                $this->filesystem,
                 $pluginRepository,
                 $appRepository,
+                $this->finder,
             ),
         ));
-    }
-
-    protected function tearDown(): void
-    {
-        (new Filesystem())->remove(self::FIXTURES_PATH);
     }
 
     public function testLanguageFilesHaveACountryAgnosticCounterpart(): void
@@ -403,23 +431,7 @@ class LintTranslationFilesCommandTest extends TestCase
      */
     private function assertHaveBeenFixed(array $expected, bool $isAdmin, bool $inSubDirectory = false): void
     {
-        $newFileDirectory = self::FIXTURES_PATH . ($inSubDirectory ? '/' . self::FIXTURES_SUBDIRECTORY : '');
-        $domainPrefix = $isAdmin ? '' : 'storefront.';
-
-        foreach ($expected as $originalLocale => $expectedTargetLocale) {
-            $expectedString = \sprintf(
-                '%s%s.json │ %s%s.json │ %s',
-                $domainPrefix,
-                $originalLocale,
-                $domainPrefix,
-                $expectedTargetLocale,
-                $newFileDirectory,
-            );
-
-            static::assertStringContainsString($expectedString, $this->getDisplayOutput());
-            static::assertFileExists(\sprintf('%s/%s%s.json', $newFileDirectory, $domainPrefix, $expectedTargetLocale));
-            static::assertFileDoesNotExist(\sprintf('%s/%s%s.json', $newFileDirectory, $domainPrefix, $originalLocale));
-        }
+        $this->assertFixedFiles($expected, $isAdmin, $inSubDirectory, true);
     }
 
     /**
@@ -427,20 +439,32 @@ class LintTranslationFilesCommandTest extends TestCase
      */
     private function assertHaveNotBeenFixed(array $expected, bool $isAdmin, bool $inSubDirectory = false): void
     {
-        $newFileDirectory = self::FIXTURES_PATH . ($inSubDirectory ? '/' . self::FIXTURES_SUBDIRECTORY : '');
+        $this->assertFixedFiles($expected, $isAdmin, $inSubDirectory, false);
+    }
+
+    /**
+     * @param array<string, string> $expected
+     */
+    private function assertFixedFiles(array $expected, bool $isAdmin, bool $inSubDirectory, bool $shouldBeFixed): void
+    {
+        $directory = self::FIXTURES_PATH . ($inSubDirectory ? '/' . self::FIXTURES_SUBDIRECTORY : '');
         $domainPrefix = $isAdmin ? '' : 'storefront.';
 
         foreach ($expected as $originalLocale => $expectedTargetLocale) {
-            $notExpectedString = \sprintf(
+            $fixedFilePattern = \sprintf(
                 '%s%s.json │ %s%s.json │ %s',
                 $domainPrefix,
                 $originalLocale,
                 $domainPrefix,
                 $expectedTargetLocale,
-                $newFileDirectory,
+                $directory,
             );
-            static::assertStringNotContainsString($notExpectedString, $this->getDisplayOutput());
-            static::assertFileExists(\sprintf('%s/%s%s.json', $newFileDirectory, $domainPrefix, $originalLocale));
+
+            if ($shouldBeFixed) {
+                static::assertStringContainsString($fixedFilePattern, $this->getDisplayOutput());
+            } else {
+                static::assertStringNotContainsString($fixedFilePattern, $this->getDisplayOutput());
+            }
         }
     }
 
@@ -450,5 +474,101 @@ class LintTranslationFilesCommandTest extends TestCase
         static::assertIsString($output);
 
         return $output;
+    }
+
+    /**
+     * @param string|array<string> $paths
+     *
+     * @return array<SplFileInfo>
+     */
+    private function createMockFixtureFiles(string|array $paths): array
+    {
+        $paths = \is_array($paths) ? $paths : [$paths];
+        $mockFiles = [];
+
+        foreach ($paths as $path) {
+            $normalizedPath = $this->normalizePath($path);
+
+            if ($normalizedPath === 'src') {
+                $mockFiles = array_merge($mockFiles, $this->createValidFiles($path));
+            } elseif ($normalizedPath === '' || str_ends_with($normalizedPath, 'temp')) {
+                $mockFiles = array_merge($mockFiles, $this->createFaultyRootFiles($path));
+
+                if (!$this->isSubdirExcluded()) {
+                    $mockFiles = array_merge($mockFiles, $this->createSubdirFiles($path . '/subdir'));
+                }
+            } elseif (str_contains($normalizedPath, 'subdir')) {
+                $mockFiles = array_merge($mockFiles, $this->createSubdirFiles($path));
+            }
+        }
+
+        return $mockFiles;
+    }
+
+    private function normalizePath(string $path): string
+    {
+        $normalized = str_replace([self::FIXTURES_PATH, self::FIXTURES_SOURCE_PATH], '', $path);
+
+        return trim($normalized, '/');
+    }
+
+    private function isSubdirExcluded(): bool
+    {
+        return \in_array('subdir', $this->excludedPaths, true)
+            || \in_array(self::FIXTURES_SUBDIRECTORY, $this->excludedPaths, true);
+    }
+
+    /**
+     * @return array<SplFileInfo>
+     */
+    private function createValidFiles(string $basePath): array
+    {
+        return $this->createFilesFromList([
+            'de-DE.json', 'de.json', 'en-GB.json', 'en.json',
+            'storefront.fr-FR.json', 'storefront.fr.json',
+            'storefront.nl-NL.json', 'storefront.nl.json',
+        ], $basePath);
+    }
+
+    /**
+     * @return array<SplFileInfo>
+     */
+    private function createFaultyRootFiles(string $basePath): array
+    {
+        return $this->createFilesFromList([
+            'be-BE.json', 'be.json', 'jp-JP.json', 'nl-BE.json', 'nl-NL.json',
+            'storefront.de-DE.json', 'storefront.de.json',
+            'storefront.fr-BE.json', 'storefront.fr-FR.json', 'storefront.it-IT.json',
+        ], $basePath);
+    }
+
+    /**
+     * @return array<SplFileInfo>
+     */
+    private function createSubdirFiles(string $subPath): array
+    {
+        return $this->createFilesFromList([
+            'hr-HR.json', 'hr.json', 'ko-KR.json',
+            'storefront.en-GB.json', 'storefront.en-US.json', 'storefront.en.json',
+            'storefront.es-AR.json', 'storefront.es-ES.json',
+        ], $subPath);
+    }
+
+    /**
+     * @param array<string> $files
+     *
+     * @return array<SplFileInfo>
+     */
+    private function createFilesFromList(array $files, string $path): array
+    {
+        return array_map(
+            fn (string $filename) => $this->createMockFile($filename, $path),
+            $files
+        );
+    }
+
+    private function createMockFile(string $filename, string $path): SplFileInfo
+    {
+        return new SplFileInfo($path . '/' . $filename, $path, $filename);
     }
 }

@@ -24,7 +24,7 @@ use Symfony\Component\HttpFoundation\Session\Session;
 /**
  * @internal
  */
-#[Package('framework')]
+#[Package('checkout')]
 #[CoversClass(ContextGatewayController::class)]
 class ContextGatewayControllerTest extends TestCase
 {
@@ -154,10 +154,9 @@ class ContextGatewayControllerTest extends TestCase
 
         $requestStack = new RequestStack([$request]);
 
-        $container = $this->createMock(ContainerInterface::class);
+        $container = static::createStub(ContainerInterface::class);
         $container
             ->method('get')
-            ->with('request_stack')
             ->willReturn($requestStack);
 
         return $container;

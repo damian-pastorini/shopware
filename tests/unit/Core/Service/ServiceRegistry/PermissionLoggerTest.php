@@ -5,7 +5,9 @@ namespace Shopware\Tests\Unit\Core\Service\ServiceRegistry;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Shopware\Core\Framework\App\ShopId\ShopId;
 use Shopware\Core\Framework\App\ShopId\ShopIdProvider;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Service\Message\LogPermissionToRegistryMessage;
 use Shopware\Core\Service\Permission\ConsentState;
 use Shopware\Core\Service\Permission\PermissionsConsent;
@@ -19,6 +21,7 @@ use Symfony\Component\Messenger\MessageBusInterface;
 /**
  * @internal
  */
+#[Package('framework')]
 #[CoversClass(PermissionLogger::class)]
 class PermissionLoggerTest extends TestCase
 {
@@ -59,10 +62,14 @@ class PermissionLoggerTest extends TestCase
         $this->messageBus
             ->expects($this->once())
             ->method('dispatch')
-            ->with(static::callback(function (LogPermissionToRegistryMessage $message) use ($consent) {
+            ->with(static::callback(static function (LogPermissionToRegistryMessage $message) use ($consent) {
                 return $message->permissionsConsent === $consent && $message->consentState === ConsentState::GRANTED;
             }))
             ->willReturn(new Envelope(new \stdClass()));
+
+        $this->client->expects($this->never())->method('saveConsent');
+        $this->shopIdProvider->expects($this->never())->method('getShopId');
+        $this->systemConfigService->expects($this->never())->method('getString');
 
         $this->permissionLogger->log($consent, ConsentState::GRANTED);
     }
@@ -76,7 +83,7 @@ class PermissionLoggerTest extends TestCase
             grantedAt: new \DateTime('2025-06-13 12:00:00')
         );
 
-        $shopId = 'test-shop-id';
+        $shopId = ShopId::v2('test-shop-id');
         $licenseHost = 'https://example.com';
 
         $this->shopIdProvider
@@ -93,14 +100,16 @@ class PermissionLoggerTest extends TestCase
         $this->client
             ->expects($this->once())
             ->method('saveConsent')
-            ->with(static::callback(function (SaveConsentRequest $request) use ($consent, $shopId, $licenseHost) {
+            ->with(static::callback(static function (SaveConsentRequest $request) use ($consent, $shopId, $licenseHost) {
                 return $request->identifier === $consent->identifier
                     && $request->consentingUserId === $consent->consentingUserId
-                    && $request->shopIdentifier === $shopId
+                    && $request->shopIdentifier === $shopId->id
                     && $request->consentDate === $consent->grantedAt->format(\DateTime::ATOM)
                     && $request->consentRevision === $consent->revision
                     && $request->licenseHost === $licenseHost;
             }));
+
+        $this->messageBus->expects($this->never())->method('dispatch');
 
         $this->permissionLogger->logSync($consent, ConsentState::GRANTED);
     }
@@ -127,6 +136,8 @@ class PermissionLoggerTest extends TestCase
             ->method('revokeConsent')
             ->with($consent->identifier);
 
+        $this->messageBus->expects($this->never())->method('dispatch');
+
         $this->permissionLogger->logSync($consent, ConsentState::REVOKED);
     }
 
@@ -139,7 +150,7 @@ class PermissionLoggerTest extends TestCase
             grantedAt: new \DateTime('2025-06-13 12:00:00')
         );
 
-        $shopId = 'test-shop-id';
+        $shopId = ShopId::v2('test-shop-id');
 
         $this->shopIdProvider
             ->expects($this->once())
@@ -155,14 +166,16 @@ class PermissionLoggerTest extends TestCase
         $this->client
             ->expects($this->once())
             ->method('saveConsent')
-            ->with(static::callback(function (SaveConsentRequest $request) use ($consent, $shopId) {
+            ->with(static::callback(static function (SaveConsentRequest $request) use ($consent, $shopId) {
                 return $request->identifier === $consent->identifier
                     && $request->consentingUserId === $consent->consentingUserId
-                    && $request->shopIdentifier === $shopId
+                    && $request->shopIdentifier === $shopId->id
                     && $request->consentDate === $consent->grantedAt->format(\DateTime::ATOM)
                     && $request->consentRevision === $consent->revision
                     && $request->licenseHost === '';
             }));
+
+        $this->messageBus->expects($this->never())->method('dispatch');
 
         $this->permissionLogger->logSync($consent, ConsentState::GRANTED);
     }
@@ -179,10 +192,14 @@ class PermissionLoggerTest extends TestCase
         $this->messageBus
             ->expects($this->once())
             ->method('dispatch')
-            ->with(static::callback(function (LogPermissionToRegistryMessage $message) use ($consent) {
+            ->with(static::callback(static function (LogPermissionToRegistryMessage $message) use ($consent) {
                 return $message->permissionsConsent === $consent && $message->consentState === ConsentState::REVOKED;
             }))
             ->willReturn(new Envelope(new \stdClass()));
+
+        $this->client->expects($this->never())->method('saveConsent');
+        $this->shopIdProvider->expects($this->never())->method('getShopId');
+        $this->systemConfigService->expects($this->never())->method('getString');
 
         $this->permissionLogger->log($consent, ConsentState::REVOKED);
     }

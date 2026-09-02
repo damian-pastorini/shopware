@@ -23,8 +23,8 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Serializer\Encoder\DecoderInterface;
 
-#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [AdministrationRouteScope::ID]])]
 #[Package('framework')]
+#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [AdministrationRouteScope::ID]])]
 class AdminSearchController extends AbstractController
 {
     /**
@@ -51,7 +51,7 @@ class AdminSearchController extends AbstractController
         foreach ($criteriaCollection as $entity => $criteria) {
             $missing = $this->criteriaValidator->validate($entity, $criteria, $context);
 
-            if (!empty($missing)) {
+            if ($missing !== []) {
                 $violations[$entity] = (new MissingPrivilegeException($missing))->getErrors()->current();
                 $criteriaCollection->remove($entity);
             }

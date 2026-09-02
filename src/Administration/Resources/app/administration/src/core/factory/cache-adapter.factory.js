@@ -12,15 +12,15 @@ const allowUrlList = [
     '/search/salutation',
     '/search/product-search-config',
     '/search/product-search-config-field',
-    '/app-system/action-button/product/list',
     '_action/system-config',
     '/_action/system-config',
-    'app-system/action-button/product/list',
     '/search/currency',
     '/search/order',
     '/search/customer',
     '/_info/me',
     '/_info/config-me',
+    '_action/product/types',
+    '/_action/product/types',
 ];
 
 /**

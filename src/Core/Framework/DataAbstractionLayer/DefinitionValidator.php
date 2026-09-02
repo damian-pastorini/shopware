@@ -4,6 +4,8 @@ namespace Shopware\Core\Framework\DataAbstractionLayer;
 
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Schema\Column;
+use Doctrine\DBAL\Schema\Index\IndexType;
+use Doctrine\DBAL\Schema\Schema;
 use Doctrine\DBAL\Schema\Table;
 use Shopware\Core\Framework\DataAbstractionLayer\Exception\DefinitionNotFoundException;
 use Shopware\Core\Framework\DataAbstractionLayer\Field\AssociationField;
@@ -28,6 +30,7 @@ use Shopware\Core\Framework\DataAbstractionLayer\Field\StorageAware;
 use Shopware\Core\Framework\DataAbstractionLayer\Field\TranslatedField;
 use Shopware\Core\Framework\DataAbstractionLayer\Field\TranslationsAssociationField;
 use Shopware\Core\Framework\DataAbstractionLayer\Field\VersionField;
+use Shopware\Core\Framework\Feature;
 use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Struct\ArrayEntity;
 use Symfony\Component\String\Inflector\EnglishInflector;
@@ -41,20 +44,30 @@ class DefinitionValidator
     private const IGNORE_FIELDS = [
         'product.cover',
         'order_line_item.cover',
-        'customer.defaultBillingAddress',
-        'customer.defaultShippingAddress',
         'customer.activeShippingAddress',
         'customer.activeBillingAddress',
         'product_configurator_setting.selected',
         'sales_channel.wishlists',
         'product.wishlists',
-        'order.billingAddress',
         'product_search_config.excludedTerms',
         'media.metaDataRaw',
         'product.sortedProperties',
         'product.cheapestPriceContainer',
         'product.cheapest_price',
         'product.cheapest_price_accessor',
+        'sales_channel_domain.external_storefront_language_id',
+    ];
+
+    /**
+     * @deprecated tag:v6.8.0 - should be cleared in preparation for 6.9
+     */
+    private const FEATURE_GATED_IGNORE_FIELDS = [
+        'customer.defaultBillingAddress',
+        'customer.defaultShippingAddress',
+        'customer_address.defaultBillingAddressCustomer',
+        'customer_address.defaultShippingAddressCustomer',
+        'order.billingAddress',
+        'order_address.billingAddressOrder',
     ];
 
     private const PLURAL_EXCEPTIONS = [
@@ -90,7 +103,9 @@ class DefinitionValidator
     private const TABLES_WITHOUT_DEFINITION = [
         'admin_elasticsearch_index_task',
         'app_config',
+        'app_feature',
         'cart',
+        'deleted_apps',
         'migration',
         'sales_channel_api_context',
         'elasticsearch_index_task',
@@ -105,6 +120,19 @@ class DefinitionValidator
         'subscription_cart',
         'oauth_user',
         'theme_runtime_config',
+        'consent_state',
+        'consent_log',
+        'mcp_tool_result_cache',
+        'mcp_toolset_session',
+        'webhook_delivery',
+        'webhook_stream',
+    ];
+
+    /**
+     * @deprecated tag:v6.8.0 - should be cleared in preparation for 6.9
+     */
+    private const MAJOR_REMOVED_DEFINITIONS = [
+        'import_export_profile_translation',
     ];
 
     private const IGNORED_ENTITY_PROPERTIES = [
@@ -163,27 +191,46 @@ class DefinitionValidator
     }
 
     /**
+     * @param list<string> $toleratedNonStandardForeignKeys Foreign key constraint names that are knowingly
+     *                                                      tolerated to reference a non-standard key
+     *
      * @return array<class-string<EntityDefinition|DefinitionInstanceRegistry>, list<string>>
      */
-    public function validate(): array
+    public function validate(array $toleratedNonStandardForeignKeys = []): array
     {
         $violations = [];
 
+        $schema = $this->connection->createSchemaManager()->introspectSchema();
+
         foreach ($this->registry->getDefinitions() as $definition) {
             $definitionClass = $definition->getClass();
-            // ignore definitions from a test namespace https://regex101.com/r/hpxAVN/1
-            if (preg_match('/.*\\\\Tests?\\\\.*/', $definitionClass) || preg_match('/.*ComposerChild\\\\.*/', $definitionClass)) {
+            if ($this->shouldSkipDefinition($definitionClass)) {
                 continue;
             }
             if (\in_array($definitionClass, [AttributeEntityDefinition::class, AttributeTranslationDefinition::class, AttributeMappingDefinition::class], true)) {
                 continue;
             }
+            if (Feature::isActive('v6.8.0.0') && \in_array($definition->getEntityName(), self::MAJOR_REMOVED_DEFINITIONS, true)) {
+                continue;
+            }
 
             $violations[$definitionClass] = [];
 
-            $violations = array_merge_recursive($violations, $this->validateSchema($definition));
+            if (!$schema->hasTable($definition->getEntityName())) {
+                $violations[$definitionClass][] = \sprintf(
+                    'Table "%s" referenced by definition but not found in schema',
+                    $definition->getEntityName()
+                );
+                $violations = array_merge_recursive($violations, $this->checkEntityNameConstant($definition));
 
-            $violations = array_merge_recursive($violations, $this->validateColumn($definition));
+                continue;
+            }
+
+            $violations = array_merge_recursive($violations, $this->validateSchema($definition, $schema));
+
+            $violations = array_merge_recursive($violations, $this->validatePrimaryKeyConsistency($definition, $schema));
+
+            $violations = array_merge_recursive($violations, $this->validateColumn($definition, $schema));
 
             $violations = array_merge_recursive($violations, $this->checkEntityNameConstant($definition));
 
@@ -215,10 +262,10 @@ class DefinitionValidator
                 $this->checkParentDefinition($definition)
             );
 
-            $violations = array_merge_recursive($violations, $this->validateAssociations($definition));
+            $violations = array_merge_recursive($violations, $this->validateAssociations($definition, $schema));
 
             if (is_subclass_of($definition, EntityTranslationDefinition::class)) {
-                $violations = array_merge_recursive($violations, $this->validateTranslatedColumnsAreNullable($definition));
+                $violations = array_merge_recursive($violations, $this->validateTranslatedColumnsAreNullable($definition, $schema));
                 $violations = array_merge_recursive($violations, $this->validateEntityTranslationGettersAreNullable($definition));
                 $violations = array_merge_recursive($violations, $this->validateEntityTranslationDefinitions($definition));
             }
@@ -229,10 +276,22 @@ class DefinitionValidator
             }
         }
 
-        $tableSchemas = $this->connection->createSchemaManager()->listTables();
-        $violations = array_merge_recursive($violations, $this->findNotRegisteredTables($tableSchemas));
+        $violations = array_merge_recursive($violations, $this->findNotRegisteredTables($schema->getTables()));
+
+        $violations = array_merge_recursive($violations, $this->validateForeignKeysReferenceUniqueKey($schema, $toleratedNonStandardForeignKeys));
 
         return array_filter($violations);
+    }
+
+    /**
+     * Check if a definition should be skipped during validation
+     *
+     * @see https://regex101.com/r/hpxAVN/1
+     */
+    protected function shouldSkipDefinition(string $definitionClass): bool
+    {
+        return (bool) preg_match('/.*\\\\Tests?\\\\.*/', $definitionClass)
+            || (bool) preg_match('/.*ComposerChild\\\\.*/', $definitionClass);
     }
 
     /**
@@ -245,17 +304,15 @@ class DefinitionValidator
         $violations = [];
 
         foreach ($tables as $table) {
-            if (\in_array($table->getName(), self::TABLES_WITHOUT_DEFINITION, true)) {
+            $tableName = $table->getObjectName()->toString();
+            if (\in_array($tableName, self::TABLES_WITHOUT_DEFINITION, true)) {
                 continue;
             }
 
             try {
-                $this->registry->getByEntityName($table->getName());
+                $this->registry->getByEntityName($tableName);
             } catch (DefinitionNotFoundException) {
-                $violations[] = \sprintf(
-                    'Table "%s" has no configured definition',
-                    $table->getName()
-                );
+                $violations[] = \sprintf('Table "%s" has no configured definition', $tableName);
             }
         }
 
@@ -274,9 +331,11 @@ class DefinitionValidator
         $fields = $definition->getFields();
 
         $notices = [];
+        $parentClass = $reflection->getParentClass();
+
         foreach ($reflection->getProperties() as $property) {
             $key = $definition->getEntityName() . '.' . $property->getName();
-            if (\in_array($key, self::IGNORE_FIELDS, true)) {
+            if ($this->isIgnoredField($key)) {
                 continue;
             }
 
@@ -294,7 +353,6 @@ class DefinitionValidator
                 $notices[] = \sprintf('Field %s in entity struct should not be private in %s, as it needs to be accessible by the DAL, see https://developer.shopware.com/docs/guides/plugins/plugins/framework/data-handling/add-custom-complex-data.html#entity-class', $property->getName(), $definition->getClass());
             }
 
-            $parentClass = $reflection->getParentClass();
             if (!$parentClass) {
                 continue;
             }
@@ -335,7 +393,7 @@ class DefinitionValidator
             }
 
             $key = $definition->getEntityName() . '.' . $field->getPropertyName();
-            if (\in_array($key, self::IGNORE_FIELDS, true)) {
+            if ($this->isIgnoredField($key)) {
                 continue;
             }
 
@@ -350,6 +408,7 @@ class DefinitionValidator
                 $getterMethods[] = 'is' . $propertyName;
                 $getterMethods[] = 'has' . $propertyName;
                 $getterMethods[] = 'has' . preg_replace('/^has/', '', $propertyName);
+                $getterMethods[] = 'was' . preg_replace('/^was/', '', $propertyName);
             }
 
             $hasGetter = false;
@@ -381,7 +440,7 @@ class DefinitionValidator
     /**
      * @return array<class-string<EntityDefinition>, list<string>>
      */
-    private function validateAssociations(EntityDefinition $definition): array
+    private function validateAssociations(EntityDefinition $definition, Schema $schema): array
     {
         $violations = [];
 
@@ -398,7 +457,7 @@ class DefinitionValidator
 
             $key = $definition->getEntityName() . '.' . $association->getPropertyName();
 
-            if (\in_array($key, self::IGNORE_FIELDS, true)) {
+            if ($this->isIgnoredField($key)) {
                 continue;
             }
 
@@ -409,7 +468,7 @@ class DefinitionValidator
             if ($association instanceof OneToManyAssociationField) {
                 $violations = array_merge_recursive(
                     $violations,
-                    $this->validateOneToMany($definition, $association)
+                    $this->validateOneToMany($definition, $association, $schema)
                 );
 
                 if ($association instanceof TranslationsAssociationField) {
@@ -440,7 +499,7 @@ class DefinitionValidator
             if ($association instanceof ManyToManyAssociationField) {
                 $violations = array_merge_recursive(
                     $violations,
-                    $this->validateManyToMany($definition, $association)
+                    $this->validateManyToMany($definition, $association, $schema)
                 );
             }
         }
@@ -451,11 +510,11 @@ class DefinitionValidator
     /**
      * @return array<class-string<EntityDefinition>, list<string>>
      */
-    private function validateTranslatedColumnsAreNullable(EntityTranslationDefinition $translationDefinition): array
+    private function validateTranslatedColumnsAreNullable(EntityTranslationDefinition $translationDefinition, Schema $schema): array
     {
         $violations = [];
 
-        $columns = $this->connection->createSchemaManager()->listTableColumns($translationDefinition->getEntityName());
+        $columns = $schema->getTable($translationDefinition->getEntityName())->getColumns();
 
         $translatedFields = $translationDefinition->getParentDefinition()
             ->getFields()
@@ -476,7 +535,7 @@ class DefinitionValidator
                 continue;
             }
 
-            if ($column->getNotnull() && empty($column->getDefault())) {
+            if ($column->getNotnull() && $column->getDefault() === null) {
                 $violations[$translationDefinition->getClass()][] = \sprintf(
                     'Column `%s`.`%s` is not nullable',
                     $translationDefinition->getEntityName(),
@@ -494,7 +553,7 @@ class DefinitionValidator
     private function getColumnByName(string $name, array $columns): ?Column
     {
         foreach ($columns as $column) {
-            if ($column->getName() === $name) {
+            if ($column->getObjectName()->toString() === $name) {
                 return $column;
             }
         }
@@ -574,12 +633,12 @@ class DefinitionValidator
 
         $parentDefinition = $translationDefinition->getParentDefinition();
         $translationsAssociationFields = $parentDefinition->getFields()
-            ->filterInstance(TranslationsAssociationField::class)
-            ->filter(fn (TranslationsAssociationField $f) => $f->getReferenceDefinition() === $translationDefinition)->getElements();
+            ->filter(static fn (Field $f) => $f instanceof TranslationsAssociationField && $f->getReferenceDefinition() === $translationDefinition)
+            ->getElements();
 
         $parentDefinitionClass = $parentDefinition->getClass();
         $translationDefinitionClass = $translationDefinition->getClass();
-        if (empty($translationsAssociationFields)) {
+        if ($translationsAssociationFields === []) {
             $violations[$parentDefinitionClass] = \sprintf(
                 'The parentDefinition `%s` for `%s` should define a `TranslationsAssociationField for `%s`. The parentDefinition could be wrong too.',
                 $parentDefinitionClass,
@@ -598,7 +657,7 @@ class DefinitionValidator
     {
         $translatedFieldsInParent = array_keys($parentDefinition->getFields()->filterInstance(TranslatedField::class)->getElements());
 
-        $translatedFields = array_keys($translationDefinition->getFields()->filter(fn (Field $f) => !$f->is(PrimaryKey::class)
+        $translatedFields = array_keys($translationDefinition->getFields()->filter(static fn (Field $f) => !$f->is(PrimaryKey::class)
             && !$f instanceof AssociationField
             && !\in_array($f->getPropertyName(), ['createdAt', 'updatedAt'], true))->getElements());
 
@@ -641,7 +700,7 @@ class DefinitionValidator
         $associationViolations = [];
 
         $reverseSide = $reference->getFields()->filter(
-            function (Field $field) use ($association, $definition) {
+            static function (Field $field) use ($association, $definition) {
                 if (!$field instanceof OneToOneAssociationField) {
                     return false;
                 }
@@ -697,7 +756,7 @@ class DefinitionValidator
         $associationViolations = [];
 
         $reverseSide = $reference->getFields()->filter(
-            function (Field $field) use ($association, $definition) {
+            static function (Field $field) use ($association, $definition) {
                 if (!$field instanceof OneToManyAssociationField) {
                     return false;
                 }
@@ -736,7 +795,7 @@ class DefinitionValidator
     /**
      * @return array<class-string<EntityDefinition>, list<string>>
      */
-    private function validateOneToMany(EntityDefinition $definition, OneToManyAssociationField $association): array
+    private function validateOneToMany(EntityDefinition $definition, OneToManyAssociationField $association, Schema $schema): array
     {
         $reference = $association->getReferenceDefinition();
 
@@ -744,7 +803,7 @@ class DefinitionValidator
         $associationViolations = $this->validateSetterIsNotNull($definition, $association, $associationViolations);
 
         $reference->getFields()->filter(
-            function (Field $field) use ($association, $definition) {
+            static function (Field $field) use ($association, $definition) {
                 if (!$field instanceof ManyToOneAssociationField) {
                     return false;
                 }
@@ -772,13 +831,13 @@ class DefinitionValidator
             }
         }
 
-        return $this->validateForeignKeyOnDeleteBehaviour($definition, $association, $reference, $associationViolations);
+        return $this->validateForeignKeyOnDeleteBehaviour($definition, $association, $reference, $associationViolations, $schema);
     }
 
     /**
      * @return array<class-string<EntityDefinition>, list<string>>
      */
-    private function validateManyToMany(EntityDefinition $definition, ManyToManyAssociationField $association): array
+    private function validateManyToMany(EntityDefinition $definition, ManyToManyAssociationField $association, Schema $schema): array
     {
         $reference = $association->getToManyReferenceDefinition();
 
@@ -834,7 +893,7 @@ class DefinitionValidator
 
         if ($definition->isVersionAware() && $reference->isVersionAware()) {
             $versionField = $mapping->getFields()
-                ->filter(fn (Field $field) => $field instanceof ReferenceVersionField && $field->getVersionReferenceDefinition() === $definition)->first();
+                ->filter(static fn (Field $field) => $field instanceof ReferenceVersionField && $field->getVersionReferenceDefinition() === $definition)->first();
 
             if (!$versionField) {
                 $violations[$mapping->getClass()][] = \sprintf(
@@ -845,7 +904,7 @@ class DefinitionValidator
             }
 
             $referenceVersionField = $mapping->getFields()
-                ->filter(fn (Field $field) => $field instanceof ReferenceVersionField && $field->getVersionReferenceDefinition() === $reference)->first();
+                ->filter(static fn (Field $field) => $field instanceof ReferenceVersionField && $field->getVersionReferenceDefinition() === $reference)->first();
 
             if (!$referenceVersionField) {
                 $violations[$mapping->getClass()][] = \sprintf(
@@ -856,9 +915,9 @@ class DefinitionValidator
             }
         }
 
-        $violations = $this->validateForeignKeyOnDeleteBehaviour($definition, $association, $reference, $violations);
+        $violations = $this->validateForeignKeyOnDeleteBehaviour($definition, $association, $reference, $violations, $schema);
 
-        $reverse = $reference->getFields()->filter(fn (Field $field) => $field instanceof ManyToManyAssociationField
+        $reverse = $reference->getFields()->filter(static fn (Field $field) => $field instanceof ManyToManyAssociationField
             && $field->getToManyReferenceDefinition() === $definition
             && $field->getMappingDefinition() === $association->getMappingDefinition())->first();
 
@@ -881,15 +940,16 @@ class DefinitionValidator
     /**
      * @return array<class-string<EntityDefinition>, list<string>>
      */
-    private function validateSchema(EntityDefinition $definition): array
+    private function validateSchema(EntityDefinition $definition, Schema $schema): array
     {
-        $columns = $this->connection->createSchemaManager()->listTableColumns($definition->getEntityName());
+        $columns = $schema->getTable($definition->getEntityName())->getColumns();
 
         $violations = [];
         $mappedFieldNames = [];
 
         foreach ($columns as $column) {
-            $field = $definition->getFields()->getByStorageName($column->getName());
+            $columnName = $column->getObjectName()->toString();
+            $field = $definition->getFields()->getByStorageName($columnName);
 
             if ($field) {
                 $mappedFieldNames[] = $field->getPropertyName();
@@ -897,7 +957,7 @@ class DefinitionValidator
                 continue;
             }
 
-            $association = $definition->getFields()->get($column->getName());
+            $association = $definition->getFields()->get($columnName);
 
             if ($association instanceof AssociationField && $association->is(Inherited::class)) {
                 $mappedFieldNames[] = $association->getPropertyName();
@@ -926,34 +986,212 @@ class DefinitionValidator
     /**
      * @return array<class-string<EntityDefinition>, list<string>>
      */
-    private function validateColumn(EntityDefinition $definition): array
+    private function validateColumn(EntityDefinition $definition, Schema $schema): array
     {
-        $columns = $this->connection->createSchemaManager()->listTableColumns($definition->getEntityName());
+        $columns = $schema->getTable($definition->getEntityName())->getColumns();
 
         $notices = [];
 
         foreach ($columns as $column) {
-            if (\in_array($definition->getEntityName() . '.' . $column->getName(), self::IGNORE_FIELDS, true)) {
+            $columnName = $column->getObjectName()->toString();
+            if ($this->isIgnoredField($definition->getEntityName() . '.' . $columnName)) {
                 continue;
             }
 
-            if ($definition->getFields()->getByStorageName($column->getName())) {
+            if ($definition->getFields()->getByStorageName($columnName)) {
                 continue;
             }
 
-            $association = $definition->getFields()->get($column->getName());
+            $association = $definition->getFields()->get($columnName);
 
             if ($association instanceof AssociationField && $association->is(Inherited::class)) {
                 continue;
             }
 
-            $notices[] = \sprintf(
-                'Column %s has no configured field',
-                $column->getName()
-            );
+            $notices[] = \sprintf('Column %s has no configured field', $columnName);
         }
 
         return [$definition->getClass() => $notices];
+    }
+
+    /**
+     * Validates that PrimaryKey flags in entity definition match the database PRIMARY KEY constraint
+     *
+     * @return array<class-string<EntityDefinition>, list<string>>
+     */
+    private function validatePrimaryKeyConsistency(EntityDefinition $definition, Schema $schema): array
+    {
+        if (!$schema->hasTable($definition->getEntityName())) {
+            return [];
+        }
+
+        $table = $schema->getTable($definition->getEntityName());
+
+        // Get primary key columns from database
+        $primaryKeyConstraint = $table->getPrimaryKeyConstraint();
+        $databasePrimaryKeys = $primaryKeyConstraint ? array_map(
+            static fn ($identifier) => $identifier->toString(),
+            $primaryKeyConstraint->getColumnNames()
+        ) : [];
+
+        // Get primary key fields from entity definition
+        $definitionPkColumns = [];
+
+        foreach ($definition->getPrimaryKeys() as $pkField) {
+            if (!$pkField instanceof StorageAware) {
+                continue;
+            }
+            $definitionPkColumns[] = $pkField->getStorageName();
+        }
+
+        // Sort both arrays for consistent comparison
+        sort($databasePrimaryKeys);
+        sort($definitionPkColumns);
+
+        if ($databasePrimaryKeys !== $definitionPkColumns) {
+            return [$definition->getClass() => [\sprintf(
+                'Primary key mismatch in entity "%s": Table has PRIMARY KEY (%s), but entity definition has PrimaryKey flags on (%s). This causes entity hydration to fail silently. Ensure PrimaryKey flags match the database schema exactly.',
+                $definition->getEntityName(),
+                implode(', ', $databasePrimaryKeys),
+                implode(', ', $definitionPkColumns)
+            )]];
+        }
+
+        return [$definition->getClass() => []];
+    }
+
+    /**
+     * Validates that every foreign key references columns that form a complete PRIMARY or UNIQUE key
+     * on the parent table.
+     *
+     * Since MySQL 8.4 the server variable restrict_fk_on_non_standard_key defaults to ON and rejects
+     * foreign keys that reference a non-unique key or only a prefix of a composite key. Such foreign
+     * keys can still be created on older/lenient servers but break schema imports on 8.4 (e.g.
+     * disaster-recovery mysqldump restores). This check guards against introducing new ones.
+     *
+     * @param list<string> $toleratedForeignKeys Foreign key constraint names excluded from this check
+     *
+     * @return array<class-string<EntityDefinition|DefinitionInstanceRegistry>, list<string>>
+     */
+    private function validateForeignKeysReferenceUniqueKey(Schema $schema, array $toleratedForeignKeys): array
+    {
+        $violations = [];
+
+        foreach ($schema->getTables() as $table) {
+            $tableName = $table->getObjectName()->toString();
+
+            try {
+                $violationKey = $this->registry->getByEntityName($tableName)->getClass();
+            } catch (DefinitionNotFoundException) {
+                $violationKey = DefinitionInstanceRegistry::class;
+            }
+
+            foreach ($table->getForeignKeys() as $foreignKey) {
+                $foreignKeyName = $foreignKey->getObjectName()?->getIdentifier()->getValue() ?? '';
+                if (\in_array($foreignKeyName, $toleratedForeignKeys, true)) {
+                    continue;
+                }
+
+                $referencedTableName = $foreignKey->getReferencedTableName()->getUnqualifiedName()->getValue();
+                if (!$schema->hasTable($referencedTableName)) {
+                    // Referenced table is not part of the introspected schema, cannot validate.
+                    continue;
+                }
+
+                $referencedColumns = $this->normalizeColumnNames(array_map(
+                    static fn ($columnName): string => $columnName->toString(),
+                    $foreignKey->getReferencedColumnNames()
+                ));
+
+                $isStandard = false;
+                foreach ($this->collectUniqueKeyColumnSets($schema->getTable($referencedTableName)) as $keyColumns) {
+                    if ($keyColumns === $referencedColumns) {
+                        $isStandard = true;
+
+                        break;
+                    }
+                }
+
+                if (!$isStandard) {
+                    $violations[$violationKey][] = \sprintf(
+                        'Foreign key "%s" on table "%s" references %s(%s), which is not a complete PRIMARY or UNIQUE key of the referenced table. MySQL 8.4 (restrict_fk_on_non_standard_key=ON) rejects such foreign keys, which breaks schema imports. Reference the full primary/unique key (e.g. include the missing version_id column) or drop the constraint.',
+                        $foreignKeyName !== '' ? $foreignKeyName : '(unnamed)',
+                        $table->getObjectName()->toString(),
+                        $referencedTableName,
+                        implode(', ', $referencedColumns)
+                    );
+                }
+            }
+        }
+
+        return $violations;
+    }
+
+    /**
+     * Returns the normalized column sets of every key on the table that MySQL accepts as a foreign-key
+     * target: the PRIMARY KEY and each UNIQUE index. Prefix indexes (e.g. `col(191)`) are excluded as
+     * they cannot back a foreign key.
+     *
+     * @return list<list<string>>
+     */
+    private function collectUniqueKeyColumnSets(Table $table): array
+    {
+        $keys = [];
+
+        $primaryKey = $table->getPrimaryKeyConstraint();
+        if ($primaryKey !== null) {
+            $keys[] = $this->normalizeColumnNames(array_map(
+                static fn ($columnName): string => $columnName->toString(),
+                $primaryKey->getColumnNames()
+            ));
+        }
+
+        foreach ($table->getIndexes() as $index) {
+            if ($index->getType() !== IndexType::UNIQUE) {
+                continue;
+            }
+
+            // Partial (predicate) indexes cannot be used as a foreign-key target.
+            if ($index->getPredicate() !== null) {
+                continue;
+            }
+
+            $indexedColumns = $index->getIndexedColumns();
+
+            // Prefix indexes (e.g. `col(191)`) cannot be used as a foreign-key target.
+            $isPrefixIndex = false;
+            foreach ($indexedColumns as $indexedColumn) {
+                if ($indexedColumn->getLength() !== null) {
+                    $isPrefixIndex = true;
+
+                    break;
+                }
+            }
+
+            if ($isPrefixIndex) {
+                continue;
+            }
+
+            $keys[] = $this->normalizeColumnNames(array_map(
+                static fn ($indexedColumn): string => $indexedColumn->getColumnName()->toString(),
+                $indexedColumns
+            ));
+        }
+
+        return $keys;
+    }
+
+    /**
+     * @param list<string> $columnNames
+     *
+     * @return list<string>
+     */
+    private function normalizeColumnNames(array $columnNames): array
+    {
+        return array_map(
+            static fn (string $columnName): string => mb_strtolower(trim($columnName, '`"')),
+            $columnNames
+        );
     }
 
     /**
@@ -1067,10 +1305,7 @@ class DefinitionValidator
         $definitionClass = $definition->getClass();
         // Definition has constant ENTITY_NAME and is not empty
         if (!\defined($definitionClass . '::ENTITY_NAME') || \constant($definitionClass . '::ENTITY_NAME') === '') {
-            $violations = array_merge_recursive(
-                $violations,
-                [$definitionClass => [\sprintf('ENTITY_NAME constant Missing in %s', $definitionClass)]]
-            );
+            return [$definitionClass => [\sprintf('ENTITY_NAME constant Missing in %s', $definitionClass)]];
         }
 
         // GetEntityName returns same Value as ENTITY_NAME
@@ -1118,46 +1353,52 @@ class DefinitionValidator
         EntityDefinition $definition,
         OneToManyAssociationField|ManyToManyAssociationField $association,
         EntityDefinition $reference,
-        array $associationViolations
+        array $associationViolations,
+        Schema $schema,
     ): array {
-        $manager = $this->connection->createSchemaManager();
+        if (!$association->getFlag(CascadeDelete::class)
+            && !$association->getFlag(RestrictDelete::class)
+            && !$association->getFlag(SetNullOnDelete::class)
+        ) {
+            return $associationViolations;
+        }
 
-        if ($association->getFlag(CascadeDelete::class)
-            || $association->getFlag(RestrictDelete::class)
-            || $association->getFlag(SetNullOnDelete::class)) {
-            $fks = $manager->listTableForeignKeys($reference->getEntityName());
+        if (!$schema->hasTable($reference->getEntityName())) {
+            return $associationViolations;
+        }
 
-            foreach ($fks as $fk) {
-                if ($fk->getReferencedTableName()->toString() !== $definition->getEntityName()
-                    || !\in_array($association->getReferenceField(), $fk->getReferencingColumnNames(), true)
-                ) {
-                    continue;
-                }
+        $fks = $schema->getTable($reference->getEntityName())->getForeignKeys();
 
-                $deleteFlag = $association->getFlag(CascadeDelete::class)
-                    ?? $association->getFlag(RestrictDelete::class)
-                    ?? $association->getFlag(SetNullOnDelete::class);
+        $deleteFlag = $association->getFlag(CascadeDelete::class)
+            ?? $association->getFlag(RestrictDelete::class)
+            ?? $association->getFlag(SetNullOnDelete::class);
 
-                if (!$deleteFlag instanceof Flag) {
-                    continue;
-                }
-
-                if (\in_array($fk->getOnDeleteAction()->value, self::DELETE_FLAG_TO_ACTION_MAPPING[$deleteFlag::class], true)) {
-                    continue;
-                }
-
-                $associationViolations[$definition->getClass()][] = \sprintf(
-                    'ForeignKey "%s" on entity "%s" has wrong OnDelete behaviour, behaviour should be "%s",'
-                    . 'because Association "%s" on entity "%s" defined flag "%s", got "%s" instead.',
-                    $fk->getName(),
-                    $reference->getEntityName(),
-                    self::DELETE_FLAG_TO_ACTION_MAPPING[$deleteFlag::class][0],
-                    $association->getPropertyName(),
-                    $definition->getEntityName(),
-                    $deleteFlag::class,
-                    $fk->getOnDeleteAction()->value
-                );
+        foreach ($fks as $fk) {
+            if ($fk->getReferencedTableName()->toString() !== $definition->getEntityName()
+                || !\in_array($association->getReferenceField(), $fk->getReferencingColumnNames(), true)
+            ) {
+                continue;
             }
+
+            if (!$deleteFlag instanceof Flag) {
+                continue;
+            }
+
+            if (\in_array($fk->getOnDeleteAction()->value, self::DELETE_FLAG_TO_ACTION_MAPPING[$deleteFlag::class], true)) {
+                continue;
+            }
+
+            $associationViolations[$definition->getClass()][] = \sprintf(
+                'ForeignKey "%s" on entity "%s" has wrong OnDelete behaviour, behaviour should be "%s",'
+                . 'because Association "%s" on entity "%s" defined flag "%s", got "%s" instead.',
+                $fk->getObjectName()?->toString(),
+                $reference->getEntityName(),
+                self::DELETE_FLAG_TO_ACTION_MAPPING[$deleteFlag::class][0],
+                $association->getPropertyName(),
+                $definition->getEntityName(),
+                $deleteFlag::class,
+                $fk->getOnDeleteAction()->value
+            );
         }
 
         return $associationViolations;
@@ -1197,14 +1438,14 @@ class DefinitionValidator
         }
 
         // see if this is the owning side
-        $owningSide = $definition->getFields()->filterInstance(FkField::class)
-            ->filter(fn (FkField $field): bool => $field->getReferenceDefinition() === $reference);
+        $owningSide = $definition->getFields()
+            ->filter(static fn (Field $field): bool => $field instanceof FkField && $field->getReferenceDefinition() === $reference);
 
         if ($owningSide->count() === 0) {
             return null;
         }
-        $referenceVersionFieldForReference = $definition->getFields()->filterInstance(ReferenceVersionField::class)
-            ->filter(fn (ReferenceVersionField $field): bool => $field->getVersionReferenceDefinition()->getClass() === $association->getReferenceDefinition()->getClass());
+        $referenceVersionFieldForReference = $definition->getFields()
+            ->filter(static fn (Field $field): bool => $field instanceof ReferenceVersionField && $field->getVersionReferenceDefinition()->getClass() === $association->getReferenceDefinition()->getClass());
 
         if (\count($referenceVersionFieldForReference) > 0) {
             return null;
@@ -1240,5 +1481,14 @@ class DefinitionValidator
                 $parentDefinition->getEntityName(),
             )],
         ];
+    }
+
+    /**
+     * @deprecated tag:v6.8.0 - should be removed when FEATURE_GATED_IGNORE_FIELDS is cleared
+     */
+    private function isIgnoredField(string $key): bool
+    {
+        return \in_array($key, self::IGNORE_FIELDS, true)
+            || (!Feature::isActive('v6.8.0.0') && \in_array($key, self::FEATURE_GATED_IGNORE_FIELDS, true));
     }
 }

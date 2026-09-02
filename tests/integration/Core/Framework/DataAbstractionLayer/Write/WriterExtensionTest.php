@@ -12,6 +12,7 @@ use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityCollection;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Struct\ArrayEntity;
 use Shopware\Core\Framework\Test\DataAbstractionLayer\Field\DataAbstractionLayerFieldTestBehaviour;
 use Shopware\Core\Framework\Test\DataAbstractionLayer\Field\TestDefinition\ExtendedProductDefinition;
@@ -22,6 +23,7 @@ use Shopware\Core\Framework\Uuid\Uuid;
 /**
  * @internal
  */
+#[Package('framework')]
 class WriterExtensionTest extends TestCase
 {
     use DataAbstractionLayerFieldTestBehaviour {
@@ -107,6 +109,8 @@ class WriterExtensionTest extends TestCase
 
         $productExtensions = $product->getExtension('oneToMany');
         static::assertInstanceOf(EntityCollection::class, $productExtensions);
+        static::assertContainsOnlyInstancesOf(ArrayEntity::class, $productExtensions);
+        /** @var EntityCollection<ArrayEntity> $productExtensions */
         $productExtensions->sort(static fn (ArrayEntity $a, ArrayEntity $b) => $a->get('name') <=> $b->get('name'));
 
         static::assertCount(2, $productExtensions);
@@ -145,6 +149,8 @@ class WriterExtensionTest extends TestCase
 
         $productExtensions = $product->getExtension('oneToMany');
         static::assertInstanceOf(EntityCollection::class, $productExtensions);
+        static::assertContainsOnlyInstancesOf(ArrayEntity::class, $productExtensions);
+        /** @var EntityCollection<ArrayEntity> $productExtensions */
         $productExtensions->sort(static fn (ArrayEntity $a, ArrayEntity $b) => $a->get('name') <=> $b->get('name'));
 
         static::assertCount(2, $productExtensions);

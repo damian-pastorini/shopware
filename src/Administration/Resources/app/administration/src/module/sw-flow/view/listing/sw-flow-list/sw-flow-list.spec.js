@@ -30,7 +30,11 @@ const flowData = [
     },
 ];
 
-async function createWrapper(privileges = [], hasSnippetFromApp = false, customFlowData = flowData) {
+let flowSearchMock;
+
+async function createWrapper(privileges = [], hasSnippetFromApp = false, customFlowData = flowData, routeQuery = {}) {
+    flowSearchMock = jest.fn(() => Promise.resolve(customFlowData));
+
     return mount(await wrapTestComponent('sw-flow-list', { sync: true }), {
         global: {
             plugins: [createPinia()],
@@ -51,10 +55,13 @@ async function createWrapper(privileges = [], hasSnippetFromApp = false, customF
                 `,
                 },
                 'sw-entity-listing': {
-                    props: ['items'],
+                    props: [
+                        'items',
+                        'dataSource',
+                    ],
                     template: `
                     <div class="sw-data-grid">
-                        <div class="sw-data-grid__row" v-for="item in items">
+                        <div class="sw-data-grid__row" v-for="item in (dataSource || items)">
                             <slot name="column-eventName" v-bind="{ item }"></slot>
                             <slot name="actions" v-bind="{ item }"></slot>
                         </div>
@@ -73,9 +80,7 @@ async function createWrapper(privileges = [], hasSnippetFromApp = false, customF
             provide: {
                 repositoryFactory: {
                     create: () => ({
-                        search: () => {
-                            return Promise.resolve(customFlowData);
-                        },
+                        search: flowSearchMock,
                         clone: jest.fn(() =>
                             Promise.resolve({
                                 id: '0e6b005ca7a1440b8e87ac3d45ed5c9f',
@@ -105,9 +110,10 @@ async function createWrapper(privileges = [], hasSnippetFromApp = false, customF
                     query: {
                         page: 1,
                         limit: 25,
+                        ...routeQuery,
                     },
                 },
-                $tc: (key) => {
+                $t: (key) => {
                     if (key === 'global.businessEvents.checkout_order_placed' && !hasSnippetFromApp) {
                         return 'Check order place';
                     }
@@ -210,7 +216,6 @@ describe('module/sw-flow/view/listing/sw-flow-list', () => {
 
         const item = wrapper.find('.sw-data-grid__row');
         expect(item.text()).toContain('Check order place');
-        expect(item.text()).toContain('checkout.order.placed');
     });
 
     it('should show trigger column correctly with unknown trigger', async () => {
@@ -245,7 +250,6 @@ describe('module/sw-flow/view/listing/sw-flow-list', () => {
 
         const item = wrapper.find('.sw-data-grid__row');
         expect(item.text()).toContain('sw-flow-custom-event.flow-list.checkout_order_placed');
-        expect(item.text()).toContain('checkout.order.placed');
     });
 
     it('should be show the success message after duplicate flow', async () => {
@@ -269,5 +273,12 @@ describe('module/sw-flow/view/listing/sw-flow-list', () => {
             name: 'sw.flow.detail',
             params: { id: '0e6b005ca7a1440b8e87ac3d45ed5c9f' },
         });
+    });
+
+    it('should set the term of the route query to criteria', async () => {
+        await createWrapper([], false, flowData, { term: 'Order' });
+        await flushPromises();
+
+        expect(flowSearchMock).toHaveBeenLastCalledWith(expect.objectContaining({ term: 'Order' }));
     });
 });

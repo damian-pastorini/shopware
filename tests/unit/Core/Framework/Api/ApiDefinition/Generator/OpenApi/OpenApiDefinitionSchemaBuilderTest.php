@@ -6,15 +6,21 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Shopware\Core\Framework\Api\ApiDefinition\Generator\OpenApi\OpenApiDefinitionSchemaBuilder;
 use Shopware\Core\Framework\DataAbstractionLayer\Write\EntityWriteGatewayInterface;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Test\Stub\DataAbstractionLayer\StaticDefinitionInstanceRegistry;
+use Shopware\Tests\Unit\Core\Framework\Api\ApiDefinition\Generator\_fixtures\DefinitionWithJsonOverride;
+use Shopware\Tests\Unit\Core\Framework\Api\ApiDefinition\Generator\_fixtures\PluginExtensionForJsonOverride;
 use Shopware\Tests\Unit\Core\Framework\Api\ApiDefinition\Generator\_fixtures\SimpleDefinition;
 use Shopware\Tests\Unit\Core\Framework\Api\ApiDefinition\Generator\OpenApi\_fixtures\ComplexDefinition;
+use Shopware\Tests\Unit\Core\Framework\Api\ApiDefinition\Generator\OpenApi\_fixtures\DefinitionWithHiddenRequiredTranslation;
+use Shopware\Tests\Unit\Core\Framework\Api\ApiDefinition\Generator\OpenApi\_fixtures\DefinitionWithHiddenRequiredTranslationTranslation;
 use Shopware\Tests\Unit\Core\Framework\Api\ApiDefinition\Generator\OpenApi\_fixtures\SimpleExtendedDefinition;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 /**
  * @internal
  */
+#[Package('framework')]
 #[CoversClass(OpenApiDefinitionSchemaBuilder::class)]
 class OpenApiDefinitionSchemaBuilderTest extends TestCase
 {
@@ -30,9 +36,12 @@ class OpenApiDefinitionSchemaBuilderTest extends TestCase
                 SimpleDefinition::class,
                 ComplexDefinition::class,
                 SimpleExtendedDefinition::class,
+                DefinitionWithJsonOverride::class,
+                DefinitionWithHiddenRequiredTranslation::class,
+                DefinitionWithHiddenRequiredTranslationTranslation::class,
             ],
-            $this->createMock(ValidatorInterface::class),
-            $this->createMock(EntityWriteGatewayInterface::class)
+            static::createStub(ValidatorInterface::class),
+            static::createStub(EntityWriteGatewayInterface::class)
         );
     }
 
@@ -58,6 +67,39 @@ class OpenApiDefinitionSchemaBuilderTest extends TestCase
         static::assertArrayHasKey('ComplexJsonApi', $schema);
     }
 
+    public function testRequiredAssociationIsOnlyRequiredInFlatSchema(): void
+    {
+        $schema = $this->schemaBuilder->getSchemaByDefinition(
+            $this->definitionRegistry->get(ComplexDefinition::class),
+            '/complex',
+            false
+        );
+        $flatSchema = json_decode($schema['Complex']->toJson(), true, flags: \JSON_THROW_ON_ERROR);
+        $jsonApiSchema = json_decode($schema['ComplexJsonApi']->toJson(), true, flags: \JSON_THROW_ON_ERROR);
+
+        static::assertContains('idField', $flatSchema['required']);
+        static::assertContains('simpleManys', $flatSchema['required']);
+        static::assertContains('idField', $jsonApiSchema['allOf'][1]['required']);
+        static::assertNotContains('simpleManys', $jsonApiSchema['allOf'][1]['required']);
+    }
+
+    public function testRequiredFieldsAreLimitedToGeneratedProperties(): void
+    {
+        $schema = $this->schemaBuilder->getSchemaByDefinition(
+            $this->definitionRegistry->get(DefinitionWithHiddenRequiredTranslation::class),
+            '/definition-with-hidden-required-translation',
+            true
+        );
+
+        $flatSchema = json_decode($schema['DefinitionWithHiddenRequiredTranslation']->toJson(), true, flags: \JSON_THROW_ON_ERROR);
+        $jsonApiSchema = json_decode($schema['DefinitionWithHiddenRequiredTranslationJsonApi']->toJson(), true, flags: \JSON_THROW_ON_ERROR);
+
+        static::assertSame(['id', 'visible'], $flatSchema['required']);
+        static::assertSame(['id', 'visible'], $jsonApiSchema['allOf'][1]['required']);
+        static::assertArrayNotHasKey('hiddenTranslated', $flatSchema['properties']);
+        static::assertArrayNotHasKey('hiddenTranslated', $jsonApiSchema['allOf'][1]['properties']);
+    }
+
     public function testTypeConversion(): void
     {
         $schema = $this->schemaBuilder->getSchemaByDefinition(
@@ -65,7 +107,7 @@ class OpenApiDefinitionSchemaBuilderTest extends TestCase
             '/simple',
             false
         );
-        $properties = json_decode($schema['Simple']->toJson(), true, \JSON_THROW_ON_ERROR, \JSON_THROW_ON_ERROR)['properties'];
+        $properties = json_decode($schema['Simple']->toJson(), true, flags: \JSON_THROW_ON_ERROR)['properties'];
         static::assertArrayHasKey('id', $properties);
         static::assertArrayHasKey('type', $properties['id']);
         static::assertSame('string', $properties['id']['type']);
@@ -101,7 +143,7 @@ class OpenApiDefinitionSchemaBuilderTest extends TestCase
             '/simple',
             false
         );
-        $properties = json_decode($schema['Simple']->toJson(), true, \JSON_THROW_ON_ERROR, \JSON_THROW_ON_ERROR)['properties'];
+        $properties = json_decode($schema['Simple']->toJson(), true, flags: \JSON_THROW_ON_ERROR)['properties'];
 
         static::assertArrayHasKey('requiredField', $properties);
         static::assertArrayHasKey('readOnlyField', $properties);
@@ -118,11 +160,34 @@ class OpenApiDefinitionSchemaBuilderTest extends TestCase
             '/simple-extended',
             false
         );
-        $properties = json_decode($schema['SimpleExtended']->toJson(), true, \JSON_THROW_ON_ERROR, \JSON_THROW_ON_ERROR)['properties'];
+        $properties = json_decode($schema['SimpleExtended']->toJson(), true, flags: \JSON_THROW_ON_ERROR)['properties'];
 
         static::assertArrayHasKey('extensions', $properties);
         static::assertArrayHasKey('properties', $properties['extensions']);
         static::assertArrayHasKey('extendedJsonField', $properties['extensions']['properties']);
+    }
+
+    public function testExtensionSchemaDoesNotGenerateBaseDefinitionFields(): void
+    {
+        $definition = $this->definitionRegistry->get(DefinitionWithJsonOverride::class);
+        $extension = new PluginExtensionForJsonOverride();
+        $definition->addExtension($extension);
+
+        try {
+            $fullSchema = $this->schemaBuilder->getSchemaByDefinition($definition, '/json-override-entity', true);
+            $schema = $this->schemaBuilder->getExtensionSchemaByDefinition($definition, '/json-override-entity', true);
+            $fullProperties = json_decode($fullSchema['JsonOverrideEntity']->toJson(), true, flags: \JSON_THROW_ON_ERROR)['properties'];
+            $properties = json_decode($schema['JsonOverrideEntity']->toJson(), true, flags: \JSON_THROW_ON_ERROR)['properties'];
+
+            static::assertSame(['extensions'], array_keys($properties));
+            static::assertSame($fullProperties['extensions'], $properties['extensions']);
+            static::assertSame('object', $properties['extensions']['type']);
+            static::assertSame('object', $properties['extensions']['properties']['pluginEntities']['type']);
+            static::assertSame('string', $properties['extensions']['properties']['pluginLabel']['type']);
+            static::assertSame('boolean', $properties['extensions']['properties']['pluginActive']['type']);
+        } finally {
+            $definition->removeExtension($extension);
+        }
     }
 
     public function testAssociationDescriptions(): void
@@ -133,7 +198,7 @@ class OpenApiDefinitionSchemaBuilderTest extends TestCase
             false
         );
 
-        $properties = json_decode($schema['Complex']->toJson(), true, \JSON_THROW_ON_ERROR, \JSON_THROW_ON_ERROR)['properties'];
+        $properties = json_decode($schema['Complex']->toJson(), true, flags: \JSON_THROW_ON_ERROR)['properties'];
 
         // Test ManyToOne association description
         static::assertArrayHasKey('simpleTo', $properties);

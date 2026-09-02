@@ -18,7 +18,7 @@ use Shopware\Core\Framework\Uuid\Uuid;
 /**
  * @internal
  */
-#[Package('framework')]
+#[Package('after-sales')]
 class ProductReviewGenerator implements DemodataGeneratorInterface
 {
     /**
@@ -87,7 +87,7 @@ class ProductReviewGenerator implements DemodataGeneratorInterface
             }
         }
 
-        if (!empty($payload)) {
+        if ($payload !== []) {
             $this->writer->upsert($this->productReviewDefinition, $payload, $writeContext);
 
             $context->getConsole()->progressAdvance(\count($payload));

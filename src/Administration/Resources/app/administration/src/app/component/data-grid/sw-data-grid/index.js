@@ -1,7 +1,7 @@
 import template from './sw-data-grid.html.twig';
 import './sw-data-grid.scss';
 
-const { Criteria } = Shopware.Data;
+const { Mixin } = Shopware;
 const utils = Shopware.Utils;
 
 /**
@@ -36,6 +36,10 @@ export default {
         'feature',
     ],
 
+    mixins: [
+        Mixin.getByName('translate-with-fallback'),
+    ],
+
     emits: [
         'selection-change',
         'select-all-items',
@@ -44,6 +48,7 @@ export default {
         'inline-edit-save',
         'inline-edit-cancel',
         'column-sort',
+        'row-click',
     ],
 
     props: {
@@ -65,21 +70,18 @@ export default {
 
         showSelection: {
             type: Boolean,
-            // eslint-disable-next-line vue/no-boolean-default
             default: true,
             required: false,
         },
 
         showActions: {
             type: Boolean,
-            // eslint-disable-next-line vue/no-boolean-default
             default: true,
             required: false,
         },
 
         showHeader: {
             type: Boolean,
-            // eslint-disable-next-line vue/no-boolean-default
             default: true,
             required: false,
         },
@@ -141,7 +143,6 @@ export default {
         compactMode: {
             type: Boolean,
             required: false,
-            // eslint-disable-next-line vue/no-boolean-default
             default: true,
         },
 
@@ -154,7 +155,6 @@ export default {
         showPreviews: {
             type: Boolean,
             required: false,
-            // eslint-disable-next-line vue/no-boolean-default
             default: true,
         },
 
@@ -175,6 +175,12 @@ export default {
                     Object.keys(this.selection).includes(item[this.itemIdentifierProperty])
                 );
             },
+        },
+
+        rowsClickable: {
+            type: Boolean,
+            required: false,
+            default: false,
         },
 
         itemIdentifierProperty: {
@@ -229,9 +235,7 @@ export default {
             currentInlineEditId: '',
             hasPreviewSlots: false,
             hasResizeColumns: false,
-            // eslint-disable-next-line vue/no-reserved-keys
             _hasColumnsResize: false,
-            // eslint-disable-next-line vue/no-reserved-keys
             _isResizing: false,
         };
     },
@@ -263,25 +267,14 @@ export default {
                 return false;
             }
 
-            if (!this.records) {
-                return false;
-            }
-
-            const currentVisibleIds = this.records.map((record) => record.id);
-
-            return (
-                this.reachMaximumSelectionExceed &&
-                Object.keys(this.selection).every((id) => !currentVisibleIds.includes(id))
-            );
+            // When the selection maximum is reached, selecting every record is no longer possible,
+            // so the select-all header checkbox is disabled (a tooltip explains why on hover).
+            return this.reachMaximumSelectionExceed;
         },
 
         allSelectedChecked() {
             if (this.isSelectAllDisabled) {
                 return false;
-            }
-
-            if (this.reachMaximumSelectionExceed) {
-                return true;
             }
 
             if (!this.records || this.records.length === 0) {
@@ -299,23 +292,6 @@ export default {
                     return selection[this.itemIdentifierProperty] === item[this.itemIdentifierProperty];
                 });
             });
-        },
-
-        userConfigRepository() {
-            return this.repositoryFactory.create('user_config');
-        },
-
-        currentUser() {
-            return Shopware.Store.get('session').currentUser;
-        },
-
-        userGridSettingCriteria() {
-            const criteria = new Criteria(1, 25);
-            const configurationKey = `grid.setting.${this.identifier}`;
-            criteria.addFilter(Criteria.equals('key', configurationKey));
-            criteria.addFilter(Criteria.equals('userId', this.currentUser && this.currentUser.id));
-
-            return criteria;
         },
 
         hasInvisibleSelection() {
@@ -409,37 +385,23 @@ export default {
                 return Promise.resolve();
             }
 
-            return this.userConfigRepository.search(this.userGridSettingCriteria, Shopware.Context.api).then((response) => {
-                if (!response.length) {
-                    return;
-                }
+            return Shopware.Service('userConfigService')
+                .search([`grid.setting.${this.identifier}`])
+                .then((response) => {
+                    const userSetting = response?.data?.[`grid.setting.${this.identifier}`];
 
-                this.currentSetting = response[0];
-                const userSetting = response[0].value;
+                    if (!userSetting) {
+                        return;
+                    }
 
-                this.applyUserSettings({
-                    columns: userSetting?.columns ?? userSetting,
-                    compact: userSetting?.compact,
-                    previews: userSetting?.previews,
+                    this.currentSetting = { value: userSetting };
+
+                    this.applyUserSettings({
+                        columns: userSetting?.columns ?? userSetting,
+                        compact: userSetting?.compact,
+                        previews: userSetting?.previews,
+                    });
                 });
-            });
-        },
-
-        findUserSettingById() {
-            return this.userConfigRepository.get(this.currentSetting.id, Shopware.Context.api).then((response) => {
-                if (!response) {
-                    return;
-                }
-
-                this.currentSetting = response;
-                const userSetting = response.value;
-
-                this.applyUserSettings({
-                    columns: userSetting?.columns ?? userSetting,
-                    compact: userSetting?.compact,
-                    previews: userSetting?.previews,
-                });
-            });
         },
 
         applyUserSettings(userSettings) {
@@ -532,13 +494,6 @@ export default {
             });
         },
 
-        createUserGridSetting() {
-            const newUserGrid = this.userConfigRepository.create(Shopware.Context.api);
-            newUserGrid.key = `grid.setting.${this.identifier}`;
-            newUserGrid.userId = this.currentUser && this.currentUser.id;
-            this.currentSetting = newUserGrid;
-        },
-
         saveUserSettings() {
             if (!this.acl.can('user_config:create') || !this.acl.can('user_config:update')) {
                 return;
@@ -548,17 +503,16 @@ export default {
                 return;
             }
 
-            if (!this.currentSetting.id) {
-                this.createUserGridSetting();
-            }
-
-            this.currentSetting.value = {
+            const currentSetting = {
                 columns: this.currentColumns,
                 compact: this.compact,
                 previews: this.previews,
             };
-            this.userConfigRepository.save(this.currentSetting, Shopware.Context.api).then(() => {
-                this.findUserSettingById();
+
+            this.currentSetting = { value: currentSetting };
+
+            return Shopware.Service('userConfigService').upsert({
+                [`grid.setting.${this.identifier}`]: currentSetting,
             });
         },
 
@@ -573,12 +527,17 @@ export default {
             ];
         },
 
+        getColumnLabel(column) {
+            return this.tWithFallback(column.label);
+        },
+
         getRowClasses(item, itemIndex) {
             return [
                 {
                     'is--inline-edit': this.isInlineEdit(item),
                     'is--selected': this.isSelected(item.id),
                     'is--disabled': this.isRecordDisabled(item),
+                    'is--clickable': this.rowsClickable,
                 },
                 `sw-data-grid__row--${itemIndex}`,
             ];
@@ -747,8 +706,15 @@ export default {
                 return;
             }
 
+            const recordId = record[this.itemIdentifierProperty];
+
+            // Keep the currently edited row stable until the user explicitly saves or cancels it.
+            if (this.isInlineEditActive && this.currentInlineEditId !== '' && this.currentInlineEditId !== recordId) {
+                return;
+            }
+
             this.enableInlineEdit();
-            this.currentInlineEditId = record[this.itemIdentifierProperty];
+            this.currentInlineEditId = recordId;
         },
 
         onClickHeaderCell(event, column) {
@@ -767,6 +733,36 @@ export default {
             this.setAllColumnElementWidths();
 
             this.sort(column);
+        },
+
+        onRowClick(event, item) {
+            if (!this.rowsClickable) {
+                return;
+            }
+
+            const target = event.target;
+
+            const blockedSelectors = [
+                '.sw-data-grid__cell--selection',
+                '.sw-data-grid__cell--actions',
+                '.sw-context-button',
+                'button',
+                'a',
+                'input',
+            ];
+
+            if (blockedSelectors.some((selector) => target.closest(selector))) {
+                return;
+            }
+
+            if (this.showSelection) {
+                const itemId = item[this.itemIdentifierProperty];
+                const isCurrentlySelected = this.isSelected(itemId);
+
+                this.selectItem(!isCurrentlySelected, item);
+            }
+
+            this.$emit('row-click', item);
         },
 
         onStartResize(event, column, columnIndex) {

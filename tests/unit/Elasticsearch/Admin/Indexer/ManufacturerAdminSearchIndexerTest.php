@@ -17,13 +17,16 @@ use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWrittenEvent;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\EntitySearchResult;
 use Shopware\Core\Framework\Event\NestedEventCollection;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Plugin\Exception\DecorationPatternException;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Elasticsearch\Admin\Indexer\ManufacturerAdminSearchIndexer;
+use Shopware\Elasticsearch\Framework\ElasticsearchFieldBuilder;
 
 /**
  * @internal
  */
+#[Package('inventory')]
 #[CoversClass(ManufacturerAdminSearchIndexer::class)]
 class ManufacturerAdminSearchIndexerTest extends TestCase
 {
@@ -32,9 +35,10 @@ class ManufacturerAdminSearchIndexerTest extends TestCase
     protected function setUp(): void
     {
         $this->searchIndexer = new ManufacturerAdminSearchIndexer(
-            $this->createMock(Connection::class),
-            $this->createMock(IteratorFactory::class),
-            $this->createMock(EntityRepository::class),
+            static::createStub(Connection::class),
+            static::createStub(IteratorFactory::class),
+            static::createStub(EntityRepository::class),
+            static::createStub(ElasticsearchFieldBuilder::class),
             100
         );
     }
@@ -42,9 +46,10 @@ class ManufacturerAdminSearchIndexerTest extends TestCase
     public function testGetUpdatedIds(): void
     {
         $indexer = new ManufacturerAdminSearchIndexer(
-            $this->createMock(Connection::class),
-            $this->createMock(IteratorFactory::class),
-            $this->createMock(EntityRepository::class),
+            static::createStub(Connection::class),
+            static::createStub(IteratorFactory::class),
+            static::createStub(EntityRepository::class),
+            static::createStub(ElasticsearchFieldBuilder::class),
             100
         );
 
@@ -82,7 +87,7 @@ class ManufacturerAdminSearchIndexerTest extends TestCase
     public function testGlobalData(): void
     {
         $context = Context::createDefaultContext();
-        $repository = $this->createMock(EntityRepository::class);
+        $repository = static::createStub(EntityRepository::class);
         $productManufacturer = new ProductManufacturerEntity();
         $productManufacturer->setUniqueIdentifier(Uuid::randomHex());
         $repository->method('search')->willReturn(
@@ -97,9 +102,10 @@ class ManufacturerAdminSearchIndexerTest extends TestCase
         );
 
         $indexer = new ManufacturerAdminSearchIndexer(
-            $this->createMock(Connection::class),
-            $this->createMock(IteratorFactory::class),
+            static::createStub(Connection::class),
+            static::createStub(IteratorFactory::class),
             $repository,
+            static::createStub(ElasticsearchFieldBuilder::class),
             100
         );
 
@@ -121,8 +127,9 @@ class ManufacturerAdminSearchIndexerTest extends TestCase
 
         $indexer = new ManufacturerAdminSearchIndexer(
             $connection,
-            $this->createMock(IteratorFactory::class),
-            $this->createMock(EntityRepository::class),
+            static::createStub(IteratorFactory::class),
+            static::createStub(EntityRepository::class),
+            static::createStub(ElasticsearchFieldBuilder::class),
             100
         );
 
@@ -131,21 +138,28 @@ class ManufacturerAdminSearchIndexerTest extends TestCase
 
         static::assertArrayHasKey($id, $documents);
 
+        /** @var array<string, mixed> $document */
         $document = $documents[$id];
 
         static::assertSame($id, $document['id']);
-        static::assertSame('809c1844f4734243b6aa04aba860cd45 manufacturer', $document['text']);
+        static::assertSame('manufacturer 809c1844f4734243b6aa04aba860cd45', $document['text']);
+        static::assertIsArray($document['name']);
     }
 
     private function getConnection(): Connection
     {
-        $connection = $this->createMock(Connection::class);
+        $connection = static::createStub(Connection::class);
 
+        $languageId = 'b7d2554b0ce847cd82f3ac9bd1c0dfca';
         $connection->method('fetchAllAssociative')->willReturn(
             [
                 [
                     'id' => '809c1844f4734243b6aa04aba860cd45',
                     'name' => 'Manufacturer',
+                    'translatedNames' => json_encode([
+                        ['languageId' => $languageId, 'name' => 'Manufacturer'],
+                    ]),
+                    'createdAt' => '2024-01-01 00:00:00.000',
                 ],
             ],
         );

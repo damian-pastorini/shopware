@@ -11,11 +11,13 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Framework\Adapter\Cache\InvalidatorStorage\MySQLInvalidatorStorage;
 use Shopware\Core\Framework\Adapter\Database\MySQLFactory;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Test\TestCaseBase\KernelTestBehaviour;
 
 /**
  * @internal
  */
+#[Package('framework')]
 class MySQLInvalidatorStorageTest extends TestCase
 {
     use KernelTestBehaviour;
@@ -106,7 +108,7 @@ class MySQLInvalidatorStorageTest extends TestCase
         $storage = new MySQLInvalidatorStorage(
             $this->connection,
             $this->logger,
-            fn (MySQLInvalidatorStorage $storage, array $tags) => $storage->store(['tag4', 'tag5', 'tag6']),
+            static fn (MySQLInvalidatorStorage $storage, array $tags) => $storage->store(['tag4', 'tag5', 'tag6']),
         );
 
         // store these first
@@ -190,7 +192,7 @@ class MySQLInvalidatorStorageTest extends TestCase
 
         $connection->expects($this->once())
             ->method('transactional')
-            ->willReturnCallback(fn (callable $cb) => $cb());
+            ->willReturnCallback(static fn (callable $cb) => $cb());
 
         $storage = new MySQLInvalidatorStorage($connection, $this->logger);
         $storage->loadAndDelete();

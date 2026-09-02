@@ -4,6 +4,7 @@ namespace Shopware\Core\Content\ProductExport\EventListener;
 
 use League\Flysystem\FilesystemOperator;
 use Shopware\Core\Content\ProductExport\ProductExportCollection;
+use Shopware\Core\Content\ProductExport\ProductExportDefinition;
 use Shopware\Core\Content\ProductExport\Service\ProductExportFileHandlerInterface;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityWriteResult;
@@ -39,7 +40,7 @@ class ProductExportEventListener implements EventSubscriberInterface
 
     public function afterWrite(EntityWrittenEvent $event): void
     {
-        foreach ($event->getWriteResults() as $writeResult) {
+        foreach ($event->getResults()->only(EntityWriteResult::OPERATION_INSERT, EntityWriteResult::OPERATION_UPDATE) as $writeResult) {
             if (!$this->productExportWritten($writeResult)) {
                 continue;
             }
@@ -52,6 +53,9 @@ class ProductExportEventListener implements EventSubscriberInterface
                     [
                         'id' => $primaryKey,
                         'generatedAt' => null,
+                        'nextGenerationAt' => null,
+                        // Reset stuck runs when a user/admin edits the export
+                        'isRunning' => false,
                     ],
                 ],
                 $event->getContext()
@@ -71,8 +75,9 @@ class ProductExportEventListener implements EventSubscriberInterface
 
     private function productExportWritten(EntityWriteResult $writeResult): bool
     {
-        return $writeResult->getEntityName() === 'product_export'
-            && $writeResult->getOperation() !== EntityWriteResult::OPERATION_DELETE
-            && !\array_key_exists('generatedAt', $writeResult->getPayload());
+        return $writeResult->getEntityName() === ProductExportDefinition::ENTITY_NAME
+            && !\array_key_exists('generatedAt', $writeResult->getPayload())
+            && !\array_key_exists('nextGenerationAt', $writeResult->getPayload())
+            && !\array_key_exists('isRunning', $writeResult->getPayload());
     }
 }

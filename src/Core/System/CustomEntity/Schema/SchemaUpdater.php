@@ -13,7 +13,7 @@ use Symfony\Component\Serializer\NameConverter\CamelCaseToSnakeCaseNameConverter
 /**
  * @internal
  *
- * @phpstan-type CustomEntityField array{name: string, type: string, required?: bool, translatable?: bool, reference: string, inherited?: bool, onDelete: string, storeApiAware?: bool, ignoreMissingReference?: bool}
+ * @phpstan-type CustomEntityField array{name: string, type: string, required?: bool, translatable?: bool, reference: string, inherited?: bool, onDelete: string, storeApiAware?: bool, ignoreMissingReference?: bool, default?: mixed}
  */
 #[Package('framework')]
 class SchemaUpdater
@@ -23,6 +23,10 @@ class SchemaUpdater
     final public const SHORTHAND_TABLE_PREFIX = 'ce_';
 
     private const COMMENT = 'custom-entity-element';
+
+    public function __construct(private readonly CustomEntityNameValidator $nameValidator)
+    {
+    }
 
     /**
      * @param list<array{name: string, fields: string}> $customEntities
@@ -43,6 +47,8 @@ class SchemaUpdater
                 );
             }
 
+            $this->nameValidator->validate($entityName, $this->fieldNames($fields));
+
             $tables[$entityName] = $fields;
         }
 
@@ -54,6 +60,16 @@ class SchemaUpdater
         foreach ($tables as $name => $fields) {
             $this->addAssociationFields($schema, $name, $fields);
         }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function fieldNames(mixed $fields): array
+    {
+        \assert(\is_array($fields) && \array_is_list($fields));
+
+        return array_map(static fn (array $field): string => (string) $field['name'], $fields);
     }
 
     /**
@@ -84,7 +100,7 @@ class SchemaUpdater
         $table->setComment(self::COMMENT);
 
         // we have to add only fields, which are not marked as translated
-        $filtered = array_filter($fields, fn (array $field) => ($field['translatable'] ?? false) === false);
+        $filtered = array_filter($fields, static fn (array $field) => ($field['translatable'] ?? false) === false);
 
         $filtered = array_filter($filtered, fn (array $field) => !$this->isAssociation($field));
 
@@ -92,9 +108,9 @@ class SchemaUpdater
 
         $binary = ['length' => 16, 'fixed' => true];
 
-        $translated = array_filter($fields, fn (array $field) => $field['translatable'] ?? false);
+        $translated = array_filter($fields, static fn (array $field) => $field['translatable'] ?? false);
 
-        if (empty($translated)) {
+        if ($translated === []) {
             return;
         }
         $languageTable = $schema->getTable('language');
@@ -108,11 +124,11 @@ class SchemaUpdater
         $pk->setQuotedColumnNames($name . '_id', 'language_id');
         $translation->addPrimaryKeyConstraint($pk->create());
 
-        $fk = substr('fk_ce_' . $translation->getName() . '_root', 0, 64);
-        $translation->addForeignKeyConstraint($table->getName(), [$name . '_id'], ['id'], ['onUpdate' => 'cascade', 'onDelete' => 'cascade'], $fk);
+        $fk = substr('fk_ce_' . $translation->getObjectName()->toString() . '_root', 0, 64);
+        $translation->addForeignKeyConstraint($table->getObjectName()->toString(), [$name . '_id'], ['id'], ['onUpdate' => 'cascade', 'onDelete' => 'cascade'], $fk);
 
-        $fk = substr('fk_ce_' . $translation->getName() . '_language_id', 0, 64);
-        $translation->addForeignKeyConstraint($languageTable->getName(), ['language_id'], ['id'], ['onUpdate' => 'cascade', 'onDelete' => 'cascade'], $fk);
+        $fk = substr('fk_ce_' . $translation->getObjectName()->toString() . '_language_id', 0, 64);
+        $translation->addForeignKeyConstraint($languageTable->getObjectName()->toString(), ['language_id'], ['id'], ['onUpdate' => 'cascade', 'onDelete' => 'cascade'], $fk);
 
         $this->addColumns($schema, $translation, $translated);
     }
@@ -132,7 +148,7 @@ class SchemaUpdater
      */
     private function addColumns(Schema $schema, Table $table, array $fields): void
     {
-        $name = $table->getName();
+        $name = $table->getObjectName()->toString();
         $binary = ['length' => 16, 'fixed' => true];
 
         $onDelete = [
@@ -225,12 +241,12 @@ class SchemaUpdater
                         $mapping->addPrimaryKeyConstraint($pk->create());
 
                         // add foreign key to source table (custom_entity_blog.id <=> custom_entity_blog_products.custom_entity_blog_id), add cascade delete for both
-                        $fkName = substr('fk_ce_' . $mapping->getName() . '_' . $name, 0, 64);
-                        $mapping->addForeignKeyConstraint($table->getName(), [self::id($name)], ['id'], $onDelete['cascade'], $fkName);
+                        $fkName = substr('fk_ce_' . $mapping->getObjectName()->toString() . '_' . $name, 0, 64);
+                        $mapping->addForeignKeyConstraint($table->getObjectName()->toString(), [self::id($name)], ['id'], $onDelete['cascade'], $fkName);
 
                         // add foreign key to reference table (product.id <=> custom_entity_blog_products.product_id), add cascade delete for both
-                        $fkName = substr('fk_ce_' . $mapping->getName() . '_' . $referenceName, 0, 64);
-                        $mapping->addForeignKeyConstraint($reference->getName(), [self::id($referenceName)], ['id'], $onDelete['cascade'], $fkName);
+                        $fkName = substr('fk_ce_' . $mapping->getObjectName()->toString() . '_' . $referenceName, 0, 64);
+                        $mapping->addForeignKeyConstraint($reference->getObjectName()->toString(), [self::id($referenceName)], ['id'], $onDelete['cascade'], $fkName);
 
                         break;
                     }
@@ -243,12 +259,12 @@ class SchemaUpdater
                     $mapping->addPrimaryKeyConstraint($pk->create());
 
                     // add foreign key to source table (custom_entity_blog.id <=> custom_entity_blog_products.custom_entity_blog_id), add cascade delete for both
-                    $fkName = substr('fk_ce_' . $mapping->getName() . '_' . $name, 0, 64);
-                    $mapping->addForeignKeyConstraint($table->getName(), [self::id($name)], ['id'], $onDelete['cascade'], $fkName);
+                    $fkName = substr('fk_ce_' . $mapping->getObjectName()->toString() . '_' . $name, 0, 64);
+                    $mapping->addForeignKeyConstraint($table->getObjectName()->toString(), [self::id($name)], ['id'], $onDelete['cascade'], $fkName);
 
                     // add foreign key to reference table (product.id <=> custom_entity_blog_products.product_id), add cascade delete for both
-                    $fkName = substr('fk_ce_' . $mapping->getName() . '_' . $referenceName, 0, 64);
-                    $mapping->addForeignKeyConstraint($reference->getName(), [self::id($referenceName), $referenceName . '_version_id'], ['id', 'version_id'], $onDelete['cascade'], $fkName);
+                    $fkName = substr('fk_ce_' . $mapping->getObjectName()->toString() . '_' . $referenceName, 0, 64);
+                    $mapping->addForeignKeyConstraint($reference->getObjectName()->toString(), [self::id($referenceName), $referenceName . '_version_id'], ['id', 'version_id'], $onDelete['cascade'], $fkName);
 
                     break;
                 case 'many-to-one':
@@ -273,15 +289,15 @@ class SchemaUpdater
                     // check for version support and consider version id in foreign key
                     if ($reference->hasColumn('version_id')) {
                         $table->addColumn($field['name'] . '_version_id', Types::BINARY, $fieldOptions + $binary);
-                        $fkName = substr('fk_ce_' . $table->getName() . '_' . $field['name'], 0, 64);
-                        $table->addForeignKeyConstraint($reference->getName(), [self::id($field['name']), $field['name'] . '_version_id'], ['id', 'version_id'], $options, $fkName);
+                        $fkName = substr('fk_ce_' . $table->getObjectName()->toString() . '_' . $field['name'], 0, 64);
+                        $table->addForeignKeyConstraint($reference->getObjectName()->toString(), [self::id($field['name']), $field['name'] . '_version_id'], ['id', 'version_id'], $options, $fkName);
 
                         break;
                     }
 
                     // add foreign key to reference table
-                    $fkName = substr('fk_ce_' . $table->getName() . '_' . $field['name'], 0, 64);
-                    $table->addForeignKeyConstraint($reference->getName(), [self::id($field['name'])], ['id'], $options, $fkName);
+                    $fkName = substr('fk_ce_' . $table->getObjectName()->toString() . '_' . $field['name'], 0, 64);
+                    $table->addForeignKeyConstraint($reference->getObjectName()->toString(), [self::id($field['name'])], ['id'], $options, $fkName);
 
                     break;
 
@@ -293,7 +309,7 @@ class SchemaUpdater
 
                     $reference = $schema->getTable($field['reference']);
 
-                    $foreignKey = $table->getName() . '_' . self::id($field['name']);
+                    $foreignKey = $table->getObjectName()->toString() . '_' . self::id($field['name']);
                     if ($reference->hasColumn($foreignKey)) {
                         continue 2;
                     }
@@ -305,8 +321,8 @@ class SchemaUpdater
                     $reference->addColumn($foreignKey, Types::BINARY, $fieldOptions + $binary + ['comment' => self::COMMENT]);
 
                     // build foreign key with special naming. This allows us to identify the custom entity modification in sw-core tables when run the cleanup
-                    $fk = substr('fk_ce_' . $reference->getName() . '_' . $foreignKey, 0, 64);
-                    $reference->addForeignKeyConstraint($table->getName(), [$foreignKey], ['id'], $options, $fk);
+                    $fk = substr('fk_ce_' . $reference->getObjectName()->toString() . '_' . $foreignKey, 0, 64);
+                    $reference->addForeignKeyConstraint($table->getObjectName()->toString(), [$foreignKey], ['id'], $options, $fk);
 
                     // add inheritance column which matches the association name: `product.customEntityBlogTopSeller`
                     $this->addInheritanceColumn($schema, $name, $field);

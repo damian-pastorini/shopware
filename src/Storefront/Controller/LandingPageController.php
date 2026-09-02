@@ -16,8 +16,8 @@ use Symfony\Component\Routing\Attribute\Route;
  * @internal
  * Do not use direct or indirect repository calls in a controller. Always use a store-api route to get or put data
  */
-#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [StorefrontRouteScope::ID]])]
 #[Package('discovery')]
+#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [StorefrontRouteScope::ID]])]
 class LandingPageController extends StorefrontController
 {
     /**
@@ -27,7 +27,12 @@ class LandingPageController extends StorefrontController
     {
     }
 
-    #[Route(path: '/landingPage/{landingPageId}', name: 'frontend.landing.page', defaults: ['_httpCache' => true], methods: ['GET'])]
+    #[Route(
+        path: '/landingPage/{landingPageId}',
+        name: 'frontend.landing.page',
+        defaults: [PlatformRequest::ATTRIBUTE_HTTP_CACHE => true],
+        methods: [Request::METHOD_GET]
+    )]
     public function index(SalesChannelContext $context, Request $request): Response
     {
         $page = $this->landingPageLoader->load($request, $context);

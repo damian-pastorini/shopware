@@ -32,14 +32,14 @@ class CancelOrderRouteTest extends TestCase
         $this->expectExceptionObject(OrderException::orderNotCancellable());
 
         $route = new CancelOrderRoute(
-            $this->createMock(OrderService::class),
-            $this->createMock(EntityRepository::class),
+            static::createStub(OrderService::class),
+            static::createStub(EntityRepository::class),
             new StaticSystemConfigService([
                 'core.cart.enableOrderRefunds' => false,
             ]),
         );
 
-        $route->cancel(new Request(['orderId' => Uuid::randomHex()]), $this->createMock(SalesChannelContext::class));
+        $route->cancel(new Request(['orderId' => Uuid::randomHex()]), static::createStub(SalesChannelContext::class));
     }
 
     public function testNoOrderId(): void
@@ -47,14 +47,14 @@ class CancelOrderRouteTest extends TestCase
         $this->expectExceptionObject(OrderException::invalidRequestParameter('orderId'));
 
         $route = new CancelOrderRoute(
-            $this->createMock(OrderService::class),
-            $this->createMock(EntityRepository::class),
+            static::createStub(OrderService::class),
+            static::createStub(EntityRepository::class),
             new StaticSystemConfigService([
                 'core.cart.enableOrderRefunds' => true,
             ]),
         );
 
-        $route->cancel(new Request(), $this->createMock(SalesChannelContext::class));
+        $route->cancel(new Request(), static::createStub(SalesChannelContext::class));
     }
 
     public function testNotLoggedIn(): void
@@ -68,14 +68,14 @@ class CancelOrderRouteTest extends TestCase
             ->willReturn(null);
 
         $route = new CancelOrderRoute(
-            $this->createMock(OrderService::class),
-            $this->createMock(EntityRepository::class),
+            static::createStub(OrderService::class),
+            static::createStub(EntityRepository::class),
             new StaticSystemConfigService([
                 'core.cart.enableOrderRefunds' => true,
             ]),
         );
 
-        $route->cancel(new Request(['orderId' => Uuid::randomHex()]), $salesChannelContext);
+        $route->cancel(new Request([], ['orderId' => Uuid::randomHex()]), $salesChannelContext);
     }
 
     public function testOrderNotFound(): void
@@ -99,14 +99,14 @@ class CancelOrderRouteTest extends TestCase
         $orderRepository = new StaticEntityRepository([[]]);
 
         $route = new CancelOrderRoute(
-            $this->createMock(OrderService::class),
+            static::createStub(OrderService::class),
             $orderRepository,
             new StaticSystemConfigService([
                 'core.cart.enableOrderRefunds' => true,
             ]),
         );
 
-        $route->cancel(new Request(['orderId' => Uuid::randomHex()]), $salesChannelContext);
+        $route->cancel(new Request([], ['orderId' => Uuid::randomHex()]), $salesChannelContext);
     }
 
     public function testCancelOrder(): void
@@ -146,6 +146,6 @@ class CancelOrderRouteTest extends TestCase
             ]),
         );
 
-        $route->cancel(new Request(['orderId' => $orderId]), $salesChannelContext);
+        $route->cancel(new Request([], ['orderId' => $orderId]), $salesChannelContext);
     }
 }

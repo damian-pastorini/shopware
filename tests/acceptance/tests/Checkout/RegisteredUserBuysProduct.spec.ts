@@ -2,7 +2,12 @@ import { test, expect, formatPrice } from '@fixtures/AcceptanceTest';
 
 test(
     'Registered shop customer buys a product.',
-    { tag: ['@Checkout', '@Storefront'] },
+    {
+        tag: [
+            '@Checkout',
+            '@Storefront',
+        ],
+    },
     async ({
         ShopCustomer,
         TestDataService,
@@ -15,8 +20,8 @@ test(
         AddProductToCart,
         ProceedFromProductToCheckout,
         ConfirmTermsAndConditions,
-        SelectInvoicePaymentOption,
-        SelectStandardShippingOption,
+        SelectPaymentMethod,
+        SelectShippingMethod,
         SubmitOrder,
     }) => {
         const product = await TestDataService.createBasicProduct();
@@ -25,15 +30,15 @@ test(
 
         await ShopCustomer.goesTo(StorefrontProductDetail.url(product));
         await ShopCustomer.expects(StorefrontProductDetail.page).toHaveTitle(
-            `${product.translated.name} | ${product.productNumber}`
+            `${product.translated.name} | ${product.productNumber}`,
         );
 
         await ShopCustomer.attemptsTo(AddProductToCart(product));
         await ShopCustomer.attemptsTo(ProceedFromProductToCheckout());
 
         await ShopCustomer.attemptsTo(ConfirmTermsAndConditions());
-        await ShopCustomer.attemptsTo(SelectInvoicePaymentOption());
-        await ShopCustomer.attemptsTo(SelectStandardShippingOption());
+        await ShopCustomer.attemptsTo(SelectPaymentMethod('Invoice'));
+        await ShopCustomer.attemptsTo(SelectShippingMethod('Standard'));
 
         await ShopCustomer.expects(StorefrontCheckoutConfirm.grandTotalPrice).toContainText(formatPrice(10.0));
 
@@ -59,8 +64,8 @@ test(
                     orderCustomer: expect.objectContaining({
                         email: DefaultSalesChannel.customer.email,
                     }),
-                })
+                }),
             );
         });
-    }
+    },
 );

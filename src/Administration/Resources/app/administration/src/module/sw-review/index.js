@@ -5,10 +5,10 @@ import './acl';
 
 const { Module } = Shopware;
 
-/* eslint-disable max-len, sw-deprecation-rules/private-feature-declarations */
+/* eslint-disable sw-deprecation-rules/private-feature-declarations */
 Shopware.Component.register('sw-review-list', () => import('./page/sw-review-list'));
 Shopware.Component.register('sw-review-detail', () => import('./page/sw-review-detail'));
-/* eslint-enable max-len, sw-deprecation-rules/private-feature-declarations */
+/* eslint-enable sw-deprecation-rules/private-feature-declarations */
 
 // eslint-disable-next-line sw-deprecation-rules/private-feature-declarations
 Module.register('sw-review', {
@@ -20,7 +20,7 @@ Module.register('sw-review', {
     targetVersion: '1.0.0',
     color: '#57D9A3',
     icon: 'regular-products',
-    favicon: 'icon-module-products.png',
+    favicon: 'icon-module-products.svg',
     entity: 'product_review',
 
     routes: {

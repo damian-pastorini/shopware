@@ -13,6 +13,9 @@ class PluginRegionStruct extends Struct
 {
     protected PluginCategoryCollection $categories;
 
+    /**
+     * @param iterable<PluginCategoryStruct> $categories
+     */
     public function __construct(
         protected string $name,
         protected string $label,

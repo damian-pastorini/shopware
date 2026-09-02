@@ -2,7 +2,7 @@
  * @sw-package framework
  */
 
-/* eslint-disable max-len, sw-deprecation-rules/private-feature-declarations */
+/* eslint-disable sw-deprecation-rules/private-feature-declarations */
 Shopware.Component.register('sw-settings-message-stats', () => import('./page/sw-settings-message-stats/index'));
 
 Shopware.Module.register('sw-settings-message-stats', {
@@ -14,7 +14,7 @@ Shopware.Module.register('sw-settings-message-stats', {
     targetVersion: '1.0.0',
     color: '#9AA8B5',
     icon: 'regular-cog',
-    favicon: 'icon-module-settings.png',
+    favicon: 'icon-module-settings.svg',
 
     routes: {
         index: {

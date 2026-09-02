@@ -19,7 +19,7 @@ use Shopware\Core\System\User\UserDefinition;
 /**
  * @internal
  */
-#[Package('framework')]
+#[Package('fundamentals@framework')]
 class UserGenerator implements DemodataGeneratorInterface
 {
     /**
@@ -75,7 +75,7 @@ class UserGenerator implements DemodataGeneratorInterface
             }
         }
 
-        if (!empty($payload)) {
+        if ($payload !== []) {
             $this->writer->upsert($this->userDefinition, $payload, $writeContext);
 
             $context->getConsole()->progressAdvance(\count($payload));

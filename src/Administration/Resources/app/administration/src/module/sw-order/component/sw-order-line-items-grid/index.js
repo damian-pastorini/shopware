@@ -38,7 +38,6 @@ export default {
         editable: {
             type: Boolean,
             required: false,
-            // eslint-disable-next-line vue/no-boolean-default
             default: true,
         },
     },
@@ -93,14 +92,14 @@ export default {
 
         unitPriceLabel() {
             if (this.taxStatus === 'net') {
-                return this.$tc('sw-order.detailBase.columnPriceNet');
+                return this.$t('sw-order.detailBase.columnPriceNet');
             }
 
             if (this.taxStatus === 'tax-free') {
-                return this.$tc('sw-order.detailBase.columnPriceTaxFree');
+                return this.$t('sw-order.detailBase.columnPriceTaxFree');
             }
 
-            return this.$tc('sw-order.detailBase.columnPriceGross');
+            return this.$t('sw-order.detailBase.columnPriceGross');
         },
 
         getLineItemColumns() {
@@ -223,11 +222,21 @@ export default {
             });
         },
 
-        onInlineEditCancel() {
+        onInlineEditCancel(item) {
+            if (item.isNew()) {
+                const itemIndex = this.order.lineItems.findIndex((lineItem) => lineItem?.id === item.id);
+                this.order.lineItems.splice(itemIndex, 1);
+
+                return;
+            }
+
             this.$emit('item-cancel');
         },
 
         createNewOrderLineItem() {
+            this.searchTerm = '';
+            this.$refs.itemFilter.term = '';
+
             const item = this.orderLineItemRepository.create();
             item.versionId = this.order.versionId;
             item.priceDefinition = {
@@ -258,20 +267,28 @@ export default {
             const item = this.createNewOrderLineItem();
             item.description = 'custom line item';
             item.type = this.lineItemTypes.CUSTOM;
-            this.order.lineItems.unshift(item);
+            this.insertLineItem(item);
         },
 
         onInsertExistingItem() {
             const item = this.createNewOrderLineItem();
             item.type = this.lineItemTypes.PRODUCT;
-            this.order.lineItems.unshift(item);
+            this.insertLineItem(item);
         },
 
         onInsertCreditItem() {
             const item = this.createNewOrderLineItem();
             item.description = 'credit line item';
             item.type = this.lineItemTypes.CREDIT;
+            this.insertLineItem(item);
+        },
+
+        insertLineItem(item) {
             this.order.lineItems.unshift(item);
+
+            this.$nextTick(() => {
+                this.$refs.dataGrid?.onDbClickCell(item);
+            });
         },
 
         onSelectionChanged(selection) {
@@ -349,6 +366,23 @@ export default {
             return item.type === this.lineItemTypes.PRODUCT;
         },
 
+        canOpenProduct(item) {
+            return this.isProductItem(item) && !!item.productId;
+        },
+
+        getProductRoute(item) {
+            if (!this.canOpenProduct(item)) {
+                return null;
+            }
+
+            return {
+                name: 'sw.product.detail',
+                params: {
+                    id: item.productId,
+                },
+            };
+        },
+
         isPromotionItem(item) {
             return item.type === this.lineItemTypes.PROMOTION;
         },
@@ -366,7 +400,7 @@ export default {
 
         showTaxValue(item) {
             return (this.isCreditItem(item.id) || this.isPromotionItem(item)) && item.price.taxRules.length > 1
-                ? this.$tc('sw-order.detailBase.textCreditTax')
+                ? this.$t('sw-order.detailBase.textCreditTax')
                 : `${item.price.calculatedTaxes[0].taxRate} %`;
         },
 
@@ -385,7 +419,7 @@ export default {
             });
 
             const decorateTaxes = sortTaxes.map((taxItem) => {
-                return this.$tc(
+                return this.$t(
                     'sw-order.detailBase.taxDetail',
                     {
                         taxRate: taxItem.taxRate,
@@ -397,7 +431,7 @@ export default {
 
             return {
                 showDelay: 300,
-                message: `${this.$tc('sw-order.detailBase.tax')}<br>${decorateTaxes.join('<br>')}`,
+                message: `${this.$t('sw-order.detailBase.tax')}<br>${decorateTaxes.join('<br>')}`,
             };
         },
 

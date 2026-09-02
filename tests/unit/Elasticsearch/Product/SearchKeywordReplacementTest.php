@@ -6,20 +6,28 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Shopware\Core\Content\Product\DataAbstractionLayer\SearchKeywordUpdater;
 use Shopware\Core\Framework\Context;
+use Shopware\Core\Framework\Feature;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Elasticsearch\Framework\ElasticsearchHelper;
 use Shopware\Elasticsearch\Product\SearchKeywordReplacement;
 
 /**
  * @internal
  */
+#[Package('framework')]
 #[CoversClass(SearchKeywordReplacement::class)]
 class SearchKeywordReplacementTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        Feature::skipTestIfActive('v6.8.0.0', $this);
+    }
+
     public function testSearchKeywordReplacement(): void
     {
         $decorated = $this->createMock(SearchKeywordUpdater::class);
 
-        $helper = $this->createMock(ElasticsearchHelper::class);
+        $helper = static::createStub(ElasticsearchHelper::class);
         $helper->method('allowIndexing')->willReturn(true);
 
         $replacement = new SearchKeywordReplacement($decorated, $helper);
@@ -31,7 +39,7 @@ class SearchKeywordReplacementTest extends TestCase
     {
         $decorated = $this->createMock(SearchKeywordUpdater::class);
 
-        $helper = $this->createMock(ElasticsearchHelper::class);
+        $helper = static::createStub(ElasticsearchHelper::class);
         $helper->method('allowIndexing')->willReturn(false);
 
         $replacement = new SearchKeywordReplacement($decorated, $helper);
@@ -43,7 +51,7 @@ class SearchKeywordReplacementTest extends TestCase
     {
         $decorated = $this->createMock(SearchKeywordUpdater::class);
         $decorated->expects($this->once())->method('reset');
-        $replacement = new SearchKeywordReplacement($decorated, $this->createMock(ElasticsearchHelper::class));
+        $replacement = new SearchKeywordReplacement($decorated, static::createStub(ElasticsearchHelper::class));
         $replacement->reset();
     }
 }

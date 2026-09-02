@@ -57,7 +57,6 @@ export default {
          */
         showSmartBar: {
             type: Boolean,
-            // eslint-disable-next-line vue/no-boolean-default
             default: true,
         },
         /**
@@ -65,7 +64,6 @@ export default {
          */
         showSearchBar: {
             type: Boolean,
-            // eslint-disable-next-line vue/no-boolean-default
             default: true,
         },
         /**
@@ -129,6 +127,7 @@ export default {
         pageClasses() {
             return {
                 'has--head-area': this.showHeadArea,
+                'has--search-bar': this.showSearchBar,
             };
         },
 
@@ -160,20 +159,6 @@ export default {
             return {
                 'border-bottom-color': this.pageColor,
                 'padding-right': this.pageOffset,
-            };
-        },
-
-        topBarActionStyles() {
-            return {
-                'margin-right': `-${this.pageOffset}`,
-            };
-        },
-
-        smartBarContentStyle() {
-            const rowNumber = this.showSearchBar ? 2 : 1;
-
-            return {
-                'grid-row': rowNumber,
             };
         },
     },
