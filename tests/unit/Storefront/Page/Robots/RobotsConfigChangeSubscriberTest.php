@@ -5,6 +5,7 @@ namespace Shopware\Tests\Unit\Storefront\Page\Robots;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\System\SystemConfig\Event\SystemConfigChangedEvent;
 use Shopware\Storefront\Page\Robots\Parser\ParsedRobots;
 use Shopware\Storefront\Page\Robots\Parser\ParseIssue;
@@ -15,6 +16,7 @@ use Shopware\Storefront\Page\Robots\RobotsConfigChangeSubscriber;
 /**
  * @internal
  */
+#[Package('discovery')]
 #[CoversClass(RobotsConfigChangeSubscriber::class)]
 class RobotsConfigChangeSubscriberTest extends TestCase
 {
@@ -107,7 +109,7 @@ class RobotsConfigChangeSubscriberTest extends TestCase
 
         $logger = $this->createMock(LoggerInterface::class);
         $logger->expects($this->exactly(2))->method('error')
-            ->willReturnCallback(function (string $message, array $context): void {
+            ->willReturnCallback(static function (string $message, array $context): void {
                 static::assertStringContainsString('Robots.txt parsing issue', $message);
                 static::assertArrayHasKey('scope', $context);
                 static::assertArrayHasKey('lineNumber', $context);
@@ -138,7 +140,7 @@ class RobotsConfigChangeSubscriberTest extends TestCase
         $logger = $this->createMock(LoggerInterface::class);
         $logger->expects($this->never())->method('error');
         $logger->expects($this->once())->method('warning')
-            ->willReturnCallback(function (string $message, array $context): void {
+            ->willReturnCallback(static function (string $message, array $context): void {
                 static::assertStringContainsString('Robots.txt parsing issue', $message);
                 static::assertArrayHasKey('scope', $context);
                 static::assertArrayHasKey('lineNumber', $context);

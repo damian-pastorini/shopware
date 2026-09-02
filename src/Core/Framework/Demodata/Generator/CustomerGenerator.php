@@ -23,7 +23,7 @@ use Shopware\Core\Test\TestDefaults;
 /**
  * @internal
  */
-#[Package('framework')]
+#[Package('checkout')]
 class CustomerGenerator implements DemodataGeneratorInterface
 {
     /**
@@ -212,7 +212,7 @@ class CustomerGenerator implements DemodataGeneratorInterface
             }
         }
 
-        if (!empty($payload)) {
+        if ($payload !== []) {
             $this->writer->upsert($this->customerDefinition, $payload, $writeContext);
 
             $context->getConsole()->progressAdvance(\count($payload));
@@ -237,10 +237,10 @@ class CustomerGenerator implements DemodataGeneratorInterface
     {
         $tagAssignments = [];
 
-        if (!empty($tags)) {
+        if ($tags !== []) {
             $chosenTags = $this->faker->randomElements($tags, $this->faker->numberBetween(1, \count($tags)));
 
-            if (!empty($chosenTags)) {
+            if ($chosenTags !== []) {
                 $tagAssignments = array_map(
                     static fn (string $id) => ['id' => $id],
                     $chosenTags

@@ -7,6 +7,8 @@ use Shopware\Core\Framework\Log\Package;
 
 /**
  * @extends EntityCollection<CountryStateTranslationEntity>
+ *
+ * @codeCoverageIgnore
  */
 #[Package('fundamentals@discovery')]
 class CountryStateTranslationCollection extends EntityCollection
@@ -16,12 +18,12 @@ class CountryStateTranslationCollection extends EntityCollection
      */
     public function getCountryStateIds(): array
     {
-        return $this->fmap(fn (CountryStateTranslationEntity $countryStateTranslation) => $countryStateTranslation->getCountryStateId());
+        return $this->fmap(static fn (CountryStateTranslationEntity $countryStateTranslation) => $countryStateTranslation->getCountryStateId());
     }
 
     public function filterByCountryStateId(string $id): self
     {
-        return $this->filter(fn (CountryStateTranslationEntity $countryStateTranslation) => $countryStateTranslation->getCountryStateId() === $id);
+        return $this->filter(static fn (CountryStateTranslationEntity $countryStateTranslation) => $countryStateTranslation->getCountryStateId() === $id);
     }
 
     /**
@@ -29,12 +31,12 @@ class CountryStateTranslationCollection extends EntityCollection
      */
     public function getLanguageIds(): array
     {
-        return $this->fmap(fn (CountryStateTranslationEntity $countryStateTranslation) => $countryStateTranslation->getLanguageId());
+        return $this->fmap(static fn (CountryStateTranslationEntity $countryStateTranslation) => $countryStateTranslation->getLanguageId());
     }
 
     public function filterByLanguageId(string $id): self
     {
-        return $this->filter(fn (CountryStateTranslationEntity $countryStateTranslation) => $countryStateTranslation->getLanguageId() === $id);
+        return $this->filter(static fn (CountryStateTranslationEntity $countryStateTranslation) => $countryStateTranslation->getLanguageId() === $id);
     }
 
     public function getApiAlias(): string

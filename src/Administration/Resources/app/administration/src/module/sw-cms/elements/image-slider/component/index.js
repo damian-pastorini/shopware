@@ -34,7 +34,7 @@ export default {
             columnCount: 7,
             columnWidth: 90,
             sliderPos: 0,
-            imgPath: '/administration/administration/static/img/cms/preview_mountain_large.jpg',
+            imgPath: '/administration/administration/static/img/cms/preview_mountain_large.webp',
             imgSrc: '',
         };
     },
@@ -87,6 +87,18 @@ export default {
             }
 
             return null;
+        },
+
+        showNavigationDots() {
+            const navigationDots = this.element.config.navigationDots.value;
+
+            return !!navigationDots && navigationDots !== 'none';
+        },
+
+        showNavigationArrows() {
+            const navigationArrows = this.element.config.navigationArrows.value;
+
+            return !!navigationArrows && navigationArrows !== 'none';
         },
 
         navDotsClass() {

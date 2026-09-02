@@ -1,3 +1,5 @@
+/* eslint-disable sw-test-rules/test-file-max-lines-warning */
+
 /**
  * @sw-package discovery
  */
@@ -30,6 +32,8 @@ const arPlacementOptions = [
     { id: 'horizontal', value: 'horizontal', label: 'Horizontal' },
     { id: 'vertical', value: 'vertical', label: 'Vertical' },
 ];
+const originalCreateObjectURL = window.URL.createObjectURL;
+const originalRevokeObjectURL = window.URL.revokeObjectURL;
 
 async function createWrapper(itemMockOptions, mediaServiceFunctions = {}, mediaRepositoryProvideFunctions = {}) {
     return mount(await wrapTestComponent('sw-media-quickinfo', { sync: true }), {
@@ -77,6 +81,7 @@ async function createWrapper(itemMockOptions, mediaServiceFunctions = {}, mediaR
                 },
                 mediaService: {
                     renameMedia: () => Promise.resolve(),
+                    prepareDownloadMedia: jest.fn(),
                     ...mediaServiceFunctions,
                 },
                 customFieldDataProviderService: {
@@ -84,6 +89,7 @@ async function createWrapper(itemMockOptions, mediaServiceFunctions = {}, mediaR
                 },
             },
             stubs: {
+                'mt-button': true,
                 'sw-page': {
                     template: `
                         <div class="sw-page">
@@ -101,6 +107,9 @@ async function createWrapper(itemMockOptions, mediaServiceFunctions = {}, mediaR
                 },
                 'sw-media-quickinfo-metadata-item': true,
                 'sw-media-preview-v2': true,
+                'sw-modal': true,
+                'sw-model-viewer': true,
+                'sw-model-editor': true,
                 'sw-media-tag': true,
                 'sw-custom-field-set-renderer': true,
                 'sw-field-error': true,
@@ -118,6 +127,7 @@ async function createWrapper(itemMockOptions, mediaServiceFunctions = {}, mediaR
                 'sw-external-link': true,
                 'sw-media-quickinfo-usage': true,
                 'sw-media-modal-move': true,
+                'sw-media-modal-v2': true,
                 'sw-inheritance-switch': true,
                 'sw-ai-copilot-badge': true,
             },
@@ -152,6 +162,7 @@ function provide3DMockOptions() {
             {
                 fileName: 'smth.glb',
                 fileExtension: 'glb',
+                mimeType: 'model/gltf-binary',
             },
             true,
             false,
@@ -161,6 +172,7 @@ function provide3DMockOptions() {
             {
                 fileName: 'smth.glb',
                 fileExtension: 'glb',
+                mimeType: 'model/gltf-binary',
             },
             true,
             false,
@@ -169,6 +181,7 @@ function provide3DMockOptions() {
         [
             {
                 fileName: 'smth.glb',
+                mimeType: 'model/gltf-binary',
                 url: 'http://shopware.example.com/media/file/2b71335f118c4940b425c55352e69e44/media-1-three-d.glb',
             },
             true,
@@ -178,6 +191,7 @@ function provide3DMockOptions() {
         [
             {
                 fileName: 'smth.glb',
+                mimeType: 'model/gltf-binary',
                 url: 'http://shopware.example.com/media/file/2b71335f118c4940b425c55352e69e44/media-1-three-d.glb',
             },
             true,
@@ -193,12 +207,23 @@ describe('module/sw-media/components/sw-media-quickinfo', () => {
     });
 
     afterEach(() => {
+        jest.restoreAllMocks();
+        Object.defineProperty(window.URL, 'createObjectURL', {
+            configurable: true,
+            writable: true,
+            value: originalCreateObjectURL,
+        });
+        Object.defineProperty(window.URL, 'revokeObjectURL', {
+            configurable: true,
+            writable: true,
+            value: originalRevokeObjectURL,
+        });
         Shopware.Store.get('actionButtons').buttons = [];
     });
 
     it('should not be able to delete', async () => {
         const wrapper = await createWrapper();
-        await wrapper.vm.$nextTick();
+        await flushPromises();
 
         const deleteMenuItem = wrapper.find('.quickaction--delete');
         expect(deleteMenuItem.classes()).toContain('sw-media-sidebar__quickaction--disabled');
@@ -208,7 +233,7 @@ describe('module/sw-media/components/sw-media-quickinfo', () => {
         global.activeAclRoles = ['media.deleter'];
 
         const wrapper = await createWrapper();
-        await wrapper.vm.$nextTick();
+        await flushPromises();
 
         const deleteMenuItem = wrapper.find('.quickaction--delete');
         expect(deleteMenuItem.classes()).not.toContain('sw-media-sidebar__quickaction--disabled');
@@ -216,7 +241,7 @@ describe('module/sw-media/components/sw-media-quickinfo', () => {
 
     it('should not be able to edit', async () => {
         const wrapper = await createWrapper();
-        await wrapper.vm.$nextTick();
+        await flushPromises();
 
         const editMenuItem = wrapper.find('.quickaction--move');
         expect(editMenuItem.classes()).toContain('sw-media-sidebar__quickaction--disabled');
@@ -226,7 +251,7 @@ describe('module/sw-media/components/sw-media-quickinfo', () => {
         global.activeAclRoles = ['media.editor'];
 
         const wrapper = await createWrapper();
-        await wrapper.vm.$nextTick();
+        await flushPromises();
 
         const editMenuItem = wrapper.find('.quickaction--move');
         expect(editMenuItem.classes()).not.toContain('sw-media-sidebar__quickaction--disabled');
@@ -248,7 +273,6 @@ describe('module/sw-media/components/sw-media-quickinfo', () => {
             {},
             {
                 renameMedia: () =>
-                    // eslint-disable-next-line prefer-promise-reject-errors
                     Promise.reject({
                         response: {
                             data: {
@@ -260,7 +284,7 @@ describe('module/sw-media/components/sw-media-quickinfo', () => {
                     }),
             },
         );
-        await wrapper.vm.$nextTick();
+        await flushPromises();
 
         await wrapper.vm.onChangeFileName('newFileName');
 
@@ -274,7 +298,7 @@ describe('module/sw-media/components/sw-media-quickinfo', () => {
         global.activeAclRoles = ['media.editor'];
 
         const wrapper = await createWrapper(mockOptions);
-        await wrapper.vm.$nextTick();
+        await flushPromises();
 
         expect(wrapper.find('.sw-media-sidebar__quickactions-switch.ar-ready-toggle').exists()).toBe(isSpatial);
     });
@@ -289,7 +313,7 @@ describe('module/sw-media/components/sw-media-quickinfo', () => {
             };
 
             const wrapper = await createWrapper(mockOptions, {}, mediaRepositoryFunctions);
-            await wrapper.vm.$nextTick();
+            await flushPromises();
 
             const arToggle = wrapper.find('.sw-media-sidebar__quickactions-switch.ar-ready-toggle');
             expect(arToggle.exists()).toBe(isSpatial);
@@ -336,7 +360,7 @@ describe('module/sw-media/components/sw-media-quickinfo', () => {
             };
 
             const wrapper = await createWrapper(mockOptions, {}, mediaRepositoryFunctions);
-            await wrapper.vm.$nextTick();
+            await flushPromises();
 
             const arToggle = wrapper.findComponent('.sw-media-sidebar__quickactions-switch.ar-ready-toggle');
             expect(arToggle.exists()).toBe(isSpatial);
@@ -402,7 +426,7 @@ describe('module/sw-media/components/sw-media-quickinfo', () => {
             };
 
             const wrapper = await createWrapper(mockOptions, {}, mediaRepositoryFunctions);
-            await wrapper.vm.$nextTick();
+            await flushPromises();
 
             const arToggle = wrapper.findComponent('.sw-media-sidebar__quickactions-switch.ar-ready-toggle');
             expect(arToggle.exists()).toBe(true);
@@ -417,9 +441,29 @@ describe('module/sw-media/components/sw-media-quickinfo', () => {
         },
     );
 
+    it('shows cover actions only for playable video formats', async () => {
+        global.activeAclRoles = ['media.editor'];
+
+        const playableWrapper = await createWrapper({
+            mimeType: 'video/mp4',
+            mediaType: { name: 'VIDEO' },
+        });
+        await flushPromises();
+
+        expect(playableWrapper.find('.quickaction--set-cover').exists()).toBe(true);
+
+        const unsupportedWrapper = await createWrapper({
+            mimeType: 'video/x-msvideo',
+            mediaType: { name: 'VIDEO' },
+        });
+        await flushPromises();
+
+        expect(unsupportedWrapper.find('.quickaction--set-cover').exists()).toBe(false);
+    });
+
     it('should build augmented reality tooltip', async () => {
         const wrapper = await createWrapper();
-        await wrapper.vm.$nextTick();
+        await flushPromises();
 
         const tooltip = wrapper.vm.buildAugmentedRealityTooltip('global.sw-media-media-item.tooltip.ar');
         expect(tooltip).toBe('global.sw-media-media-item.tooltip.ar');
@@ -457,6 +501,170 @@ describe('module/sw-media/components/sw-media-quickinfo', () => {
         await wrapper.vm.onSave();
 
         expect(eventBusEmitSpy).toHaveBeenCalledWith('sw-media-library-item-updated', wrapper.vm.item.id);
+    });
+
+    it('should download private media with media service', async () => {
+        const mediaBlob = new Blob(['media-content']);
+        const prepareDownloadMediaMock = jest.fn().mockResolvedValue({ type: 'blob' });
+        const downloadMediaMock = jest.fn().mockResolvedValue(mediaBlob);
+        const objectUrl = 'blob:media-download';
+        const createObjectURLMock = jest.fn().mockReturnValue(objectUrl);
+        const revokeObjectURLMock = jest.fn();
+        const originalCreateElement = document.createElement.bind(document);
+        const link = document.createElement('a');
+        const createElementSpy = jest.spyOn(document, 'createElement').mockImplementation((tagName, options) => {
+            if (tagName === 'a') {
+                return link;
+            }
+
+            return originalCreateElement(tagName, options);
+        });
+        const dispatchEventSpy = jest.spyOn(link, 'dispatchEvent').mockImplementation(() => true);
+        const removeSpy = jest.spyOn(link, 'remove').mockImplementation(() => {});
+
+        Object.defineProperty(window.URL, 'createObjectURL', {
+            configurable: true,
+            writable: true,
+            value: createObjectURLMock,
+        });
+        Object.defineProperty(window.URL, 'revokeObjectURL', {
+            configurable: true,
+            writable: true,
+            value: revokeObjectURLMock,
+        });
+
+        const wrapper = await createWrapper(
+            {
+                hasFile: true,
+                private: true,
+                fileName: 'private-media',
+                fileExtension: 'jpg',
+            },
+            {
+                prepareDownloadMedia: prepareDownloadMediaMock,
+                downloadMedia: downloadMediaMock,
+            },
+        );
+
+        const downloadAction = wrapper.find('.quickaction--download');
+
+        expect(downloadAction.find('sw-external-link-stub').exists()).toBe(false);
+
+        await downloadAction.trigger('click');
+        await flushPromises();
+
+        expect(prepareDownloadMediaMock).toHaveBeenCalledWith(wrapper.vm.item.id);
+        expect(downloadMediaMock).toHaveBeenCalledWith(wrapper.vm.item.id);
+        expect(createObjectURLMock).toHaveBeenCalledWith(mediaBlob);
+        expect(createElementSpy).toHaveBeenCalledWith('a');
+        expect(link.href).toBe(objectUrl);
+        expect(link.download).toBe('private-media.jpg');
+        expect(dispatchEventSpy).toHaveBeenCalledWith(expect.any(MouseEvent));
+        expect(removeSpy).toHaveBeenCalled();
+        expect(revokeObjectURLMock).toHaveBeenCalledWith(objectUrl);
+    });
+
+    it('should directly trigger external media downloads', async () => {
+        const prepareDownloadMediaMock = jest.fn().mockResolvedValue({
+            type: 'external',
+            url: 'https://cdn.example.test/download',
+        });
+        const downloadMediaMock = jest.fn();
+        const createObjectURLMock = jest.fn();
+        const originalCreateElement = document.createElement.bind(document);
+        const link = document.createElement('a');
+        const createElementSpy = jest.spyOn(document, 'createElement').mockImplementation((tagName, options) => {
+            if (tagName === 'a') {
+                return link;
+            }
+
+            return originalCreateElement(tagName, options);
+        });
+        const dispatchEventSpy = jest.spyOn(link, 'dispatchEvent').mockImplementation(() => true);
+        const removeSpy = jest.spyOn(link, 'remove').mockImplementation(() => {});
+
+        Object.defineProperty(window.URL, 'createObjectURL', {
+            configurable: true,
+            writable: true,
+            value: createObjectURLMock,
+        });
+
+        const wrapper = await createWrapper(
+            {
+                hasFile: true,
+                private: true,
+                fileName: 'private-media',
+                fileExtension: 'jpg',
+            },
+            {
+                prepareDownloadMedia: prepareDownloadMediaMock,
+                downloadMedia: downloadMediaMock,
+            },
+        );
+
+        const downloadAction = wrapper.find('.quickaction--download');
+        await downloadAction.trigger('click');
+        await flushPromises();
+
+        expect(prepareDownloadMediaMock).toHaveBeenCalledWith(wrapper.vm.item.id);
+        expect(downloadMediaMock).not.toHaveBeenCalled();
+        expect(createObjectURLMock).not.toHaveBeenCalled();
+        expect(createElementSpy).toHaveBeenCalledWith('a');
+        expect(link.href).toBe('https://cdn.example.test/download');
+        expect(link.download).toBe('');
+        expect(link.target).toBe('_blank');
+        expect(link.rel).toBe('noopener noreferrer');
+        expect(dispatchEventSpy).toHaveBeenCalledWith(expect.any(MouseEvent));
+        expect(removeSpy).toHaveBeenCalled();
+    });
+
+    it('should show notification when private media download fails', async () => {
+        const prepareDownloadMediaMock = jest.fn().mockResolvedValue({ type: 'blob' });
+        const downloadMediaMock = jest.fn().mockRejectedValue(new Error('Download failed'));
+        const wrapper = await createWrapper(
+            {
+                hasFile: true,
+                private: true,
+            },
+            {
+                prepareDownloadMedia: prepareDownloadMediaMock,
+                downloadMedia: downloadMediaMock,
+            },
+        );
+        const createNotificationErrorSpy = jest.spyOn(wrapper.vm, 'createNotificationError');
+
+        await wrapper.vm.downloadMedia();
+        await flushPromises();
+
+        expect(prepareDownloadMediaMock).toHaveBeenCalledWith(wrapper.vm.item.id);
+        expect(downloadMediaMock).toHaveBeenCalledWith(wrapper.vm.item.id);
+        expect(createNotificationErrorSpy).toHaveBeenCalledWith({
+            message: 'global.sw-media-media-item.notification.downloadError.message',
+        });
+    });
+
+    it('should return the file name without an extension when none exists', async () => {
+        const wrapper = await createWrapper({
+            fileName: 'private-media',
+            fileExtension: null,
+        });
+
+        expect(wrapper.vm.fileName).toBe('private-media');
+    });
+
+    it('should render external download link for public media', async () => {
+        const wrapper = await createWrapper({
+            hasFile: true,
+            private: false,
+            url: 'https://example.com/media/public.jpg',
+        });
+        await flushPromises();
+
+        const externalDownloadLink = wrapper.find('.quickaction--download sw-external-link-stub');
+
+        expect(externalDownloadLink.exists()).toBe(true);
+        expect(externalDownloadLink.attributes('href')).toBe('https://example.com/media/public.jpg');
+        expect(externalDownloadLink.attributes('download')).toBeDefined();
     });
 
     it('should show action button from apps', async () => {
@@ -515,10 +723,75 @@ describe('module/sw-media/components/sw-media-quickinfo', () => {
         'should show warning banner if video format is not supported (type: $mimeType, shouldShowWarning: $shouldShowWarning)',
         async ({ mimeType, shouldShowWarning }) => {
             const wrapper = await createWrapper({ mimeType, hasFile: true });
-            await wrapper.vm.$nextTick();
+            await flushPromises();
 
             const banner = wrapper.find('.sw-media-quickinfo__unsupported-format-banner');
             expect(banner.exists()).toBe(shouldShowWarning);
         },
     );
+
+    it.each([
+        { mimeType: 'model/gltf-binary', fileExtension: 'glb', fileName: 'test.glb' },
+        { mimeType: 'model/gltf+json', fileExtension: 'gltf', fileName: 'test.gltf' },
+    ])('should show model viewer for $mimeType mime type', async ({ mimeType, fileExtension, fileName }) => {
+        const wrapper = await createWrapper({
+            mimeType,
+            hasFile: true,
+            fileExtension,
+            fileName,
+        });
+        await flushPromises();
+
+        expect(wrapper.find('sw-model-viewer-stub').exists()).toBe(true);
+        expect(wrapper.find('sw-media-preview-v2-stub').exists()).toBe(false);
+    });
+
+    it.each([
+        { mimeType: 'model/step', fileExtension: 'step', fileName: 'test.step' },
+        { mimeType: 'model/obj', fileExtension: 'obj', fileName: 'test.obj' },
+    ])(
+        'should not show model viewer for non-gltf model mime type $mimeType',
+        async ({ mimeType, fileExtension, fileName }) => {
+            const wrapper = await createWrapper({
+                mimeType,
+                hasFile: true,
+                fileExtension,
+                fileName,
+            });
+            await flushPromises();
+
+            expect(wrapper.find('sw-model-viewer-stub').exists()).toBe(false);
+            expect(wrapper.find('sw-media-preview-v2-stub').exists()).toBe(true);
+        },
+    );
+
+    it('should have showModelEditorModal initially set to false', async () => {
+        const wrapper = await createWrapper();
+        await flushPromises();
+
+        expect(wrapper.vm.showModelEditorModal).toBe(false);
+    });
+
+    it('should set showModelEditorModal to true when openModelEditorModal is called', async () => {
+        const wrapper = await createWrapper();
+        await flushPromises();
+
+        expect(wrapper.vm.showModelEditorModal).toBe(false);
+
+        wrapper.vm.openModelEditorModal();
+
+        expect(wrapper.vm.showModelEditorModal).toBe(true);
+    });
+
+    it('should set showModelEditorModal to false when closeModelEditorModal is called', async () => {
+        const wrapper = await createWrapper();
+        await flushPromises();
+
+        wrapper.vm.showModelEditorModal = true;
+        expect(wrapper.vm.showModelEditorModal).toBe(true);
+
+        wrapper.vm.closeModelEditorModal();
+
+        expect(wrapper.vm.showModelEditorModal).toBe(false);
+    });
 });

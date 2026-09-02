@@ -3,10 +3,10 @@ declare(strict_types=1);
 
 namespace Shopware\Tests\Integration\Core\Framework\Plugin\KernelPluginLoader;
 
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Shopware\Core\Framework\Adapter\Composer\ComposerInfoProvider;
 use Shopware\Core\Framework\Adapter\Composer\ComposerPackage;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Plugin\KernelPluginLoader\ComposerPluginLoader;
 use Shopware\Core\Framework\Test\Plugin\PluginIntegrationTestBehaviour;
 use SwagTestComposerLoaded\SwagTestComposerLoaded;
@@ -14,7 +14,7 @@ use SwagTestComposerLoaded\SwagTestComposerLoaded;
 /**
  * @internal
  */
-#[CoversClass(ComposerPluginLoader::class)]
+#[Package('framework')]
 class ComposerPluginLoaderTest extends TestCase
 {
     use PluginIntegrationTestBehaviour;
@@ -69,7 +69,7 @@ class ComposerPluginLoaderTest extends TestCase
 
         static::assertNotEmpty($loader->getPluginInfos());
 
-        $entry = array_find($loader->getPluginInfos(), fn (array $plugin) => $plugin['name'] === 'SwagTestComposerLoaded');
+        $entry = array_find($loader->getPluginInfos(), static fn (array $plugin) => $plugin['name'] === 'SwagTestComposerLoaded');
         static::assertNotNull($entry);
 
         static::assertSame('SwagTestComposerLoaded', $entry['name']);

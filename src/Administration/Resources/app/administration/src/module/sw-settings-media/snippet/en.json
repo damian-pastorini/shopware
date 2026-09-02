@@ -2,14 +2,7 @@
   "sw-settings-media": {
     "general": {
       "title": "Media",
-      "description": "Manage media settings here.",
-      "buttonSave": "Save"
-    },
-    "3d": {
-      "lightIntensity": {
-        "label": "Light Intensity",
-        "helpText": "Change the light intensity in the 3D view."
-      }
+      "description": "Manage media settings here."
     }
   }
 }

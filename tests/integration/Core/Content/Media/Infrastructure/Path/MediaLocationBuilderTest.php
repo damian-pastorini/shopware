@@ -3,7 +3,6 @@
 namespace Shopware\Tests\Integration\Core\Content\Media\Infrastructure\Path;
 
 use Doctrine\DBAL\Connection;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Shopware\Core\Content\Media\Core\Event\MediaLocationEvent;
@@ -12,6 +11,7 @@ use Shopware\Core\Content\Media\Core\Params\MediaLocationStruct;
 use Shopware\Core\Content\Media\Core\Params\ThumbnailLocationStruct;
 use Shopware\Core\Content\Media\Infrastructure\Path\SqlMediaLocationBuilder;
 use Shopware\Core\Framework\DataAbstractionLayer\Doctrine\MultiInsertQueryQueue;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Struct\ArrayStruct;
 use Shopware\Core\Framework\Test\TestCaseBase\DatabaseTransactionBehaviour;
 use Shopware\Core\Framework\Test\TestCaseBase\KernelTestBehaviour;
@@ -22,10 +22,7 @@ use Symfony\Component\EventDispatcher\EventDispatcher;
 /**
  * @internal
  */
-#[CoversClass(SqlMediaLocationBuilder::class)]
-#[CoversClass(MediaLocationEvent::class)]
-#[CoversClass(MediaLocationStruct::class)]
-#[CoversClass(ThumbnailLocationStruct::class)]
+#[Package('discovery')]
 class MediaLocationBuilderTest extends TestCase
 {
     use DatabaseTransactionBehaviour;
@@ -130,7 +127,7 @@ class MediaLocationBuilderTest extends TestCase
 
         $dispatcher = new EventDispatcher();
 
-        $dispatcher->addListener(ThumbnailLocationEvent::class, function (ThumbnailLocationEvent $event) use ($ids): void {
+        $dispatcher->addListener(ThumbnailLocationEvent::class, static function (ThumbnailLocationEvent $event) use ($ids): void {
             static::assertArrayHasKey($ids->get('thumbnail'), $event->locations);
 
             foreach ($event as &$location) {
@@ -177,7 +174,7 @@ class MediaLocationBuilderTest extends TestCase
         $queue->execute();
 
         $dispatcher = new EventDispatcher();
-        $dispatcher->addListener(MediaLocationEvent::class, function (MediaLocationEvent $event) use ($ids): void {
+        $dispatcher->addListener(MediaLocationEvent::class, static function (MediaLocationEvent $event) use ($ids): void {
             static::assertArrayHasKey($ids->get('media'), $event->locations);
 
             foreach ($event as &$location) {

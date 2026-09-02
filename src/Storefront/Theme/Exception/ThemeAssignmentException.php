@@ -10,7 +10,7 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * @deprecated tag:v6.8.0 - Exception will be removed
  */
-#[Package('framework')]
+#[Package('discovery')]
 class ThemeAssignmentException extends ShopwareHttpException
 {
     /**
@@ -25,15 +25,17 @@ class ThemeAssignmentException extends ShopwareHttpException
         private readonly array $assignedSalesChannels,
         ?\Throwable $e = null
     ) {
+        Feature::triggerDeprecationOrThrow('v6.8.0.0', Feature::deprecatedClassMessage(self::class, 'v6.8.0.0', ThemeException::class));
+
         $parameters = ['themeName' => $themeName];
         $message = 'Unable to deactivate or uninstall theme "{{ themeName }}".';
         $message .= ' Remove the following assignments between theme and sales channel assignments: {{ assignments }}.';
         $assignments = '';
-        if (\count($themeSalesChannel) > 0) {
+        if ($themeSalesChannel !== []) {
             $assignments .= $this->formatAssignments($themeSalesChannel);
         }
 
-        if (\count($childThemeSalesChannel) > 0) {
+        if ($childThemeSalesChannel !== []) {
             $assignments .= $this->formatAssignments($childThemeSalesChannel);
         }
         $parameters['assignments'] = $assignments;

@@ -1,4 +1,3 @@
-import { MtModalRoot, MtModalTrigger, MtModalAction, MtModalClose, MtModal } from '@shopware-ag/meteor-component-library';
 import template from './sw-settings-services-revoke-permissions-modal.html.twig';
 import './sw-settings-services-revoke-permissions-modal.scss';
 import { revokePermissions } from '../../composables/permissions';
@@ -12,15 +11,14 @@ export default Shopware.Component.wrapComponentConfig({
     name: 'sw-settings-services-revoke-permissions-modal',
     template,
 
-    components: {
-        MtModalRoot,
-        MtModal,
-        MtModalAction,
-        MtModalTrigger,
-        MtModalClose,
-    },
-
     emits: ['service-permissions-revoked'],
+
+    props: {
+        servicesWithAccountRequirement: {
+            type: Array,
+            default: () => [],
+        },
+    },
 
     data() {
         return {

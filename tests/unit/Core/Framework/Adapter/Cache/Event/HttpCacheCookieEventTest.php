@@ -5,12 +5,14 @@ namespace Shopware\Tests\Unit\Core\Framework\Adapter\Cache\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Shopware\Core\Framework\Adapter\Cache\Event\HttpCacheCookieEvent;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\System\SalesChannel\SalesChannelContext;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
  * @internal
  */
+#[Package('framework')]
 #[CoversClass(HttpCacheCookieEvent::class)]
 class HttpCacheCookieEventTest extends TestCase
 {
@@ -18,7 +20,7 @@ class HttpCacheCookieEventTest extends TestCase
     {
         $event = new HttpCacheCookieEvent(
             new Request(),
-            $this->createMock(SalesChannelContext::class),
+            static::createStub(SalesChannelContext::class),
             [
                 'foo' => 'bar',
             ]
@@ -40,9 +42,21 @@ class HttpCacheCookieEventTest extends TestCase
         ], $event->getParts());
 
         static::assertSame('cf2f7bb725c46c276355ae235de7ad52', $event->getHash());
+        static::assertTrue($event->shouldResponseBeCached());
+
+        $event->doNotStore = true;
+
+        static::assertSame('cf2f7bb725c46c276355ae235de7ad52', $event->getHash());
+        static::assertFalse($event->shouldResponseBeCached());
 
         $event->isCacheable = false;
 
         static::assertSame(HttpCacheCookieEvent::NOT_CACHEABLE, $event->getHash());
+        static::assertFalse($event->shouldResponseBeCached());
+
+        $event->doNotStore = false;
+
+        static::assertSame(HttpCacheCookieEvent::NOT_CACHEABLE, $event->getHash());
+        static::assertFalse($event->shouldResponseBeCached());
     }
 }

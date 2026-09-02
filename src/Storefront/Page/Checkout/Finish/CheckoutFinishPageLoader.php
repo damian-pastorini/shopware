@@ -27,7 +27,7 @@ use Symfony\Component\HttpFoundation\Request;
 /**
  * Do not use direct or indirect repository calls in a PageLoader. Always use a store-api route to get or put data.
  */
-#[Package('framework')]
+#[Package('checkout')]
 class CheckoutFinishPageLoader
 {
     /**
@@ -60,9 +60,9 @@ class CheckoutFinishPageLoader
             $page->setOrder($this->getOrder($request, $salesChannelContext));
         });
 
-        $page->setChangedPayment((bool) $request->get('changedPayment', false));
+        $page->setChangedPayment((bool) $request->query->get('changedPayment', ''));
 
-        $page->setPaymentFailed((bool) $request->get('paymentFailed', false));
+        $page->setPaymentFailed((bool) $request->query->get('paymentFailed', ''));
 
         $page->setLogoutCustomer($salesChannelContext->getCustomer()?->getGuest() && $this->systemConfigService->get('core.cart.logoutGuestAfterCheckout', $salesChannelContext->getSalesChannelId()));
 
@@ -102,7 +102,7 @@ class CheckoutFinishPageLoader
             throw CartException::customerNotLoggedIn();
         }
 
-        $orderId = $request->get('orderId');
+        $orderId = $request->query->get('orderId');
         if (!$orderId) {
             throw RoutingException::missingRequestParameter('orderId', '/orderId');
         }
@@ -117,7 +117,8 @@ class CheckoutFinishPageLoader
             ->addAssociation('lineItems.cover')
             ->addAssociation('billingAddress.salutation')
             ->addAssociation('billingAddress.country')
-            ->addAssociation('billingAddress.countryState');
+            ->addAssociation('billingAddress.countryState')
+            ->addAssociation('currency');
 
         if (!Feature::isActive('v6.8.0.0')) {
             $criteria
@@ -143,7 +144,7 @@ class CheckoutFinishPageLoader
         }
 
         /** @var OrderEntity|null $order */
-        $order = $searchResult->get($orderId);
+        $order = $searchResult->getEntities()->get($orderId);
 
         if (!$order) {
             throw OrderException::orderNotFound($orderId);

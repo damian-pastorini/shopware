@@ -20,7 +20,7 @@ use Shopware\Core\System\SalesChannel\Aggregate\SalesChannelDomain\SalesChannelD
 /**
  * @internal
  */
-#[Package('framework')]
+#[Package('discovery')]
 class SalesChannelDomainGenerator implements DemodataGeneratorInterface
 {
     /**
@@ -112,7 +112,7 @@ class SalesChannelDomainGenerator implements DemodataGeneratorInterface
             [
                 'id' => $salesChannelId,
                 'languages' => array_map(
-                    fn (string $languageId) => ['id' => $languageId],
+                    static fn (string $languageId) => ['id' => $languageId],
                     $languageIds
                 ),
             ],

@@ -31,7 +31,6 @@ export default {
         canSetLoadingRules: {
             type: Boolean,
             required: false,
-            // eslint-disable-next-line vue/no-boolean-default
             default: true,
         },
     },
@@ -46,6 +45,11 @@ export default {
     },
 
     computed: {
+        /** @deprecated tag:v6.8.0 - Will be removed, use Shopware.Filter.getByName('asset') instead. */
+        assetFilter() {
+            return Shopware.Filter.getByName('asset');
+        },
+
         product() {
             return Shopware.Store.get('swProductDetail').product;
         },
@@ -165,7 +169,7 @@ export default {
                     allowResize: true,
                     primary: false,
                     rawData: false,
-                    width: '270px',
+                    width: 'calc(var(--scale-size-224) + var(--scale-size-24) + var(--scale-size-22))',
                     multiLine: true,
                 };
             });
@@ -180,7 +184,7 @@ export default {
                     allowResize: true,
                     primary: true,
                     rawData: false,
-                    width: '120px',
+                    width: 'calc(var(--scale-size-80) + var(--scale-size-40))',
                 },
                 {
                     property: 'quantityEnd',
@@ -189,14 +193,14 @@ export default {
                     allowResize: true,
                     primary: true,
                     rawData: false,
-                    width: '120px',
+                    width: 'calc(var(--scale-size-80) + var(--scale-size-40))',
                 },
                 {
                     property: 'type',
                     label: 'sw-product.advancedPrices.columnType',
                     visible: true,
                     allowResize: true,
-                    width: '250px',
+                    width: 'calc(var(--scale-size-224) + var(--scale-size-26))',
                     multiLine: true,
                 },
             ];
@@ -207,8 +211,27 @@ export default {
             ];
         },
 
-        assetFilter() {
-            return Shopware.Filter.getByName('asset');
+        emptyStateDescription() {
+            if (!this.isChild) {
+                return this.$t('sw-product.advancedPrices.advancedPricesNotExisting');
+            }
+
+            if (this.isInherited) {
+                return this.$t('sw-product.advancedPrices.advancedPricesInherited');
+            }
+
+            return this.$t('sw-product.advancedPrices.advancedPricesNotInherited');
+        },
+
+        parentPricesHref() {
+            if (!this.isChild || !this.isInherited) {
+                return undefined;
+            }
+
+            return this.$router.resolve({
+                name: 'sw.product.detail.prices',
+                params: { id: this.product.parentId },
+            }).href;
         },
     },
 
@@ -378,7 +401,7 @@ export default {
             // if it is the only item in the priceRuleGroup
             if (matchingPriceRuleGroup.prices.length <= 1) {
                 this.createNotificationError({
-                    message: this.$tc('sw-product.advancedPrices.deletionNotPossibleMessage'),
+                    message: this.$t('sw-product.advancedPrices.deletionNotPossibleMessage'),
                 });
 
                 return;
@@ -552,7 +575,7 @@ export default {
 
         getStartQuantityTooltip(itemIndex, quantity) {
             return {
-                message: this.$tc('sw-product.advancedPrices.advancedPriceDisabledTooltip'),
+                message: this.$t('sw-product.advancedPrices.advancedPriceDisabledTooltip'),
                 width: 275,
                 showDelay: 200,
                 disabled: itemIndex !== 0 || quantity !== 1,

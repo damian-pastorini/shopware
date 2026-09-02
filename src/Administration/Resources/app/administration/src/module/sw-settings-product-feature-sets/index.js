@@ -4,7 +4,7 @@
 
 import './acl';
 
-/* eslint-disable max-len, sw-deprecation-rules/private-feature-declarations */
+/* eslint-disable sw-deprecation-rules/private-feature-declarations */
 Shopware.Component.register(
     'sw-settings-product-feature-sets-list',
     () => import('./page/sw-settings-product-feature-sets-list'),
@@ -21,7 +21,7 @@ Shopware.Component.register(
     'sw-settings-product-feature-sets-modal',
     () => import('./component/sw-settings-product-feature-sets-modal'),
 );
-/* eslint-enable max-len, sw-deprecation-rules/private-feature-declarations */
+/* eslint-enable sw-deprecation-rules/private-feature-declarations */
 
 const { Module } = Shopware;
 
@@ -33,7 +33,7 @@ Module.register('sw-settings-product-feature-sets', {
     description: 'Essential characteristics section in the settings module',
     color: '#9AA8B5',
     icon: 'regular-cog',
-    favicon: 'icon-module-settings.png',
+    favicon: 'icon-module-settings.svg',
     entity: 'product_feature_set',
 
     routes: {

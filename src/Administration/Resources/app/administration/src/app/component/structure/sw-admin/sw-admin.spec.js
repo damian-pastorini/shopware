@@ -5,8 +5,10 @@ import 'src/app/component/structure/sw-admin';
 import { mount } from '@vue/test-utils';
 import { BroadcastChannel } from 'worker_threads';
 import { toast } from '@shopware-ag/meteor-admin-sdk';
+import MtSnackbar from '@shopware-ag/meteor-component-library/dist/esm/MtSnackbar';
+import SnackbarService from 'src/app/service/snackbar.service';
 
-async function createWrapper(isLoggedIn, forwardLogout = () => {}, route = 'sw.wofoo.index') {
+async function createWrapper(isLoggedIn, forwardLogout = () => {}, route = 'sw.wofoo.index', stubs = {}) {
     return mount(await wrapTestComponent('sw-admin', { sync: true }), {
         global: {
             stubs: {
@@ -21,6 +23,9 @@ async function createWrapper(isLoggedIn, forwardLogout = () => {}, route = 'sw.w
                 'router-view': true,
                 'sw-skip-link': true,
                 'sw-media-modal-renderer': true,
+                'sw-upload-status': true,
+                'mt-snackbar': true,
+                ...stubs,
             },
             mocks: {
                 $router: {
@@ -182,5 +187,18 @@ describe('src/app/component/structure/sw-admin/index.ts', () => {
 
         expect(wrapper.find('.mt-toast-notification').exists()).toBe(false);
         expect(wrapper.findComponent('.mt-toast').emitted('remove-toast')).toHaveLength(1);
+    });
+
+    it('should add snackbar notification', async () => {
+        wrapper = await createWrapper(true, () => {}, 'sw.wofoo.index', { 'mt-snackbar': MtSnackbar });
+
+        new SnackbarService().addSnackbar({
+            message: 'Jest snackbar',
+            variant: 'success',
+        });
+
+        await flushPromises();
+
+        expect(document.body.textContent).toContain('Jest snackbar');
     });
 });

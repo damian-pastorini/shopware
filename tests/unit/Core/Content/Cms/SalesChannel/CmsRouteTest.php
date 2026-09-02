@@ -3,7 +3,6 @@
 namespace Shopware\Tests\Unit\Core\Content\Cms\SalesChannel;
 
 use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Shopware\Core\Content\Cms\CmsException;
 use Shopware\Core\Content\Cms\CmsPageCollection;
@@ -35,7 +34,7 @@ class CmsRouteTest extends TestCase
 
     public function testGetDecorated(): void
     {
-        $pageLoader = $this->createMock(SalesChannelCmsPageLoaderInterface::class);
+        $pageLoader = static::createStub(SalesChannelCmsPageLoaderInterface::class);
         $route = new CmsRoute($pageLoader);
 
         $this->expectException(DecorationPatternException::class);
@@ -44,24 +43,25 @@ class CmsRouteTest extends TestCase
 
     public function testLoadHandlesSlotsAsArray(): void
     {
+        $slots = [
+            $this->ids->get('slot-1'),
+            $this->ids->get('slot-2'),
+            $this->ids->get('slot-3'),
+        ];
+
         $request = new Request([
-            'slots' => [
-                $this->ids->get('slot-1'),
-                $this->ids->get('slot-2'),
-                $this->ids->get('slot-3'),
-            ],
+            'slots' => $slots,
         ]);
 
         $expectedCmsPage = new CmsPageEntity();
 
         $searchResult = $this->getSearchResult($expectedCmsPage);
-        $criteria = $this->getExpectedCriteria($request->get('slots'));
+        $criteria = $this->getExpectedCriteria($slots);
         $context = Generator::generateSalesChannelContext();
 
-        $pageLoader = $this->createMock(SalesChannelCmsPageLoaderInterface::class);
+        $pageLoader = static::createStub(SalesChannelCmsPageLoaderInterface::class);
         $pageLoader
             ->method('load')
-            ->with($request, $criteria, $context)
             ->willReturn($searchResult);
 
         $actualCmsPage = (new CmsRoute($pageLoader))->load($this->ids->get('cms-page'), $request, $context)->getCmsPage();
@@ -86,10 +86,9 @@ class CmsRouteTest extends TestCase
         $criteria = $this->getExpectedCriteria($expectedSlots);
         $context = Generator::generateSalesChannelContext();
 
-        $pageLoader = $this->createMock(SalesChannelCmsPageLoaderInterface::class);
+        $pageLoader = static::createStub(SalesChannelCmsPageLoaderInterface::class);
         $pageLoader
             ->method('load')
-            ->with($request, $criteria, $context)
             ->willReturn($searchResult);
 
         $actualCmsPage = (new CmsRoute($pageLoader))->load($this->ids->get('cms-page'), $request, $context)->getCmsPage();
@@ -105,10 +104,9 @@ class CmsRouteTest extends TestCase
         $criteria = new Criteria([$this->ids->get('cms-page')]);
         $context = Generator::generateSalesChannelContext();
 
-        $pageLoader = $this->createMock(SalesChannelCmsPageLoaderInterface::class);
+        $pageLoader = static::createStub(SalesChannelCmsPageLoaderInterface::class);
         $pageLoader
             ->method('load')
-            ->with($request, $criteria, $context)
             ->willReturn($searchResult);
 
         $actualCmsPage = (new CmsRoute($pageLoader))->load($this->ids->get('cms-page'), $request, $context)->getCmsPage();
@@ -126,10 +124,9 @@ class CmsRouteTest extends TestCase
         $criteria = new Criteria([$cmsPageId]);
         $context = Generator::generateSalesChannelContext();
 
-        $pageLoader = $this->createMock(SalesChannelCmsPageLoaderInterface::class);
+        $pageLoader = static::createStub(SalesChannelCmsPageLoaderInterface::class);
         $pageLoader
             ->method('load')
-            ->with($request, $criteria, $context)
             ->willReturn($searchResult);
 
         $route = new CmsRoute($pageLoader);
@@ -152,20 +149,21 @@ class CmsRouteTest extends TestCase
     }
 
     /**
-     * @return EntitySearchResult<CmsPageCollection>&MockObject
+     * @return EntitySearchResult<CmsPageCollection>
      */
-    private function getSearchResult(?CmsPageEntity $cmsPage = null): EntitySearchResult&MockObject
+    private function getSearchResult(?CmsPageEntity $cmsPage = null): EntitySearchResult
     {
-        $searchResult = $this->createMock(EntitySearchResult::class);
+        $collection = new CmsPageCollection();
+        if ($cmsPage !== null) {
+            $cmsPage->setUniqueIdentifier('cms-page');
+            $collection->add($cmsPage);
+        }
+
+        $searchResult = static::createStub(EntitySearchResult::class);
 
         $searchResult
-            ->method('has')
-            ->with($this->ids->get('cms-page'))
-            ->willReturn((bool) $cmsPage);
-
-        $searchResult
-            ->method('first')
-            ->willReturn($cmsPage);
+            ->method('getEntities')
+            ->willReturn($collection);
 
         return $searchResult;
     }

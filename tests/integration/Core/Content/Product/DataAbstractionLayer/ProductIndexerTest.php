@@ -6,7 +6,6 @@ namespace Shopware\Tests\Integration\Core\Content\Product\DataAbstractionLayer;
 
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
-use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Shopware\Core\Content\Product\DataAbstractionLayer\CheapestPriceUpdater;
@@ -28,15 +27,19 @@ use Shopware\Core\Framework\DataAbstractionLayer\Indexing\ChildCountUpdater;
 use Shopware\Core\Framework\DataAbstractionLayer\Indexing\InheritanceUpdater;
 use Shopware\Core\Framework\DataAbstractionLayer\Indexing\ManyToManyIdFieldUpdater;
 use Shopware\Core\Framework\Event\NestedEventCollection;
+use Shopware\Core\Framework\Feature;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Test\TestCaseBase\KernelTestBehaviour;
 use Shopware\Core\Framework\Test\TestCaseBase\QueueTestBehaviour;
 use Shopware\Core\Framework\Uuid\Uuid;
+use Symfony\Component\Clock\NativeClock;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Messenger\TraceableMessageBus;
 
 /**
  * @internal
  */
+#[Package('framework')]
 class ProductIndexerTest extends TestCase
 {
     use KernelTestBehaviour;
@@ -73,16 +76,16 @@ class ProductIndexerTest extends TestCase
             self::getContainer()->get('event_dispatcher'),
             self::getContainer()->get(CheapestPriceUpdater::class),
             self::getContainer()->get(ProductStreamUpdater::class),
-            self::getContainer()->get(StatesUpdater::class),
-            $this->messageBus
+            $this->messageBus,
+            Feature::isActive('v6.8.0.0') ? null : self::getContainer()->get(StatesUpdater::class),
+            new NativeClock()
         );
     }
 
-    #[Group('slow')]
     public function testUpdateDoesNotReturnTooBigMessage(): void
     {
         $uuids = $this->getUuids(self::AMOUNT_OF_UUIDS_NEEDED_TO_TRIGGER_MESSAGE_SIZE_RESTRICTION);
-        $this->prepareGetChildrenIdsMethod($uuids);
+        $this->prepareGetChildrenIdsMethod(self::AMOUNT_OF_UUIDS_NEEDED_TO_TRIGGER_MESSAGE_SIZE_RESTRICTION);
         $context = Context::createDefaultContext();
         $nestedEvents = $this->prepareEvent($context, $uuids);
         $writtenEvent = new EntityWrittenContainerEvent($context, $nestedEvents, []);
@@ -109,13 +112,33 @@ class ProductIndexerTest extends TestCase
         static::assertCount($expectedAmountOfMessages, $messagesDispatchedInProductIndexer);
     }
 
+    public function testUpdateIncludesRelatedProductsInSmallMessage(): void
+    {
+        $productId = Uuid::randomHex();
+        $parentId = Uuid::randomHex();
+        $childId = Uuid::randomHex();
+        $this->connectionMock->method('fetchFirstColumn')->willReturn([$parentId], [$childId]);
+        $context = Context::createDefaultContext();
+
+        $message = $this->indexer->update(new EntityWrittenContainerEvent(
+            $context,
+            $this->prepareEvent($context, [$productId]),
+            []
+        ));
+
+        static::assertNotNull($message);
+        $data = $message->getData();
+        static::assertIsArray($data);
+        static::assertEqualsCanonicalizing([$productId, $parentId, $childId], array_values($data));
+    }
+
     #[DataProvider('updateCases')]
     public function testUpdate(
         int $numberOfIds,
         int $expectedCountOfMessagesDispatchedInProductIndexer
     ): void {
         $uuids = $this->getUuids($numberOfIds);
-        $this->prepareGetChildrenIdsMethod($uuids);
+        $this->prepareGetChildrenIdsMethod($numberOfIds);
         $context = Context::createDefaultContext();
         $nestedEvents = $this->prepareEvent($context, $uuids);
 
@@ -160,12 +183,9 @@ class ProductIndexerTest extends TestCase
         return $uuids;
     }
 
-    /**
-     * @param list<string> $uuids
-     */
-    private function prepareGetChildrenIdsMethod(array $uuids): void
+    private function prepareGetChildrenIdsMethod(int $numberOfUuids): void
     {
-        $this->connectionMock->method('fetchFirstColumn')->willReturn($uuids);
+        $this->connectionMock->method('fetchFirstColumn')->willReturn($this->getUuids($numberOfUuids));
     }
 
     /**

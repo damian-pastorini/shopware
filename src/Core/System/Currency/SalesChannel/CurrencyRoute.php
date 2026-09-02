@@ -9,13 +9,14 @@ use Shopware\Core\Framework\Plugin\Exception\DecorationPatternException;
 use Shopware\Core\Framework\Routing\StoreApiRouteScope;
 use Shopware\Core\PlatformRequest;
 use Shopware\Core\System\Currency\CurrencyCollection;
+use Shopware\Core\System\Currency\CurrencyDefinition;
 use Shopware\Core\System\SalesChannel\Entity\SalesChannelRepository;
 use Shopware\Core\System\SalesChannel\SalesChannelContext;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
 
-#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [StoreApiRouteScope::ID]])]
 #[Package('fundamentals@framework')]
+#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [StoreApiRouteScope::ID]])]
 class CurrencyRoute extends AbstractCurrencyRoute
 {
     final public const ALL_TAG = 'currency-route';
@@ -41,7 +42,12 @@ class CurrencyRoute extends AbstractCurrencyRoute
         return 'currency-route-' . $salesChannelId;
     }
 
-    #[Route(path: '/store-api/currency', name: 'store-api.currency', methods: ['GET', 'POST'], defaults: ['_entity' => 'currency'])]
+    #[Route(
+        path: '/store-api/currency',
+        name: 'store-api.currency',
+        methods: [Request::METHOD_GET, Request::METHOD_POST],
+        defaults: [PlatformRequest::ATTRIBUTE_ENTITY => CurrencyDefinition::ENTITY_NAME, PlatformRequest::ATTRIBUTE_HTTP_CACHE => true],
+    )]
     public function load(Request $request, SalesChannelContext $context, Criteria $criteria): CurrencyRouteResponse
     {
         $this->cacheTagCollector->addTag(self::buildName($context->getSalesChannelId()), self::ALL_TAG);

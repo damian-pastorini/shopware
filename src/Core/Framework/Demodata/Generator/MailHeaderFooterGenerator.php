@@ -15,7 +15,7 @@ use Shopware\Core\Framework\Uuid\Uuid;
 /**
  * @internal
  */
-#[Package('framework')]
+#[Package('after-sales')]
 class MailHeaderFooterGenerator implements DemodataGeneratorInterface
 {
     /**
@@ -57,7 +57,7 @@ class MailHeaderFooterGenerator implements DemodataGeneratorInterface
             }
         }
 
-        if (!empty($payload)) {
+        if ($payload !== []) {
             $this->write($payload, $context);
         }
 

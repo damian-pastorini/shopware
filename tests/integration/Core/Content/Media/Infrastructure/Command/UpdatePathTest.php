@@ -4,7 +4,6 @@ namespace Shopware\Tests\Integration\Core\Content\Media\Infrastructure\Command;
 
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Shopware\Core\Content\Media\Core\Application\MediaLocationBuilder;
@@ -14,6 +13,7 @@ use Shopware\Core\Content\Media\Core\Strategy\PlainPathStrategy;
 use Shopware\Core\Content\Media\Infrastructure\Command\UpdatePathCommand;
 use Shopware\Core\Defaults;
 use Shopware\Core\Framework\DataAbstractionLayer\Doctrine\MultiInsertQueryQueue;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Test\TestCaseBase\DatabaseTransactionBehaviour;
 use Shopware\Core\Framework\Test\TestCaseBase\KernelTestBehaviour;
 use Shopware\Core\Test\Stub\Framework\IdsCollection;
@@ -23,7 +23,7 @@ use Symfony\Component\Console\Output\NullOutput;
 /**
  * @internal
  */
-#[CoversClass(UpdatePathCommand::class)]
+#[Package('discovery')]
 class UpdatePathTest extends TestCase
 {
     use DatabaseTransactionBehaviour;

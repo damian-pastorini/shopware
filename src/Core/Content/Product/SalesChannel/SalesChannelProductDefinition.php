@@ -49,20 +49,7 @@ class SalesChannelProductDefinition extends ProductDefinition implements SalesCh
             );
         }
 
-        if ($criteria->getNestingLevel() !== Criteria::ROOT_NESTING_LEVEL) {
-            return;
-        }
-
-        if (empty($criteria->getFields())) {
-            $criteria
-                ->addAssociation('prices')
-                ->addAssociation('unit')
-                ->addAssociation('deliveryTime')
-                ->addAssociation('cover.media')
-                ->addAssociation('tax')
-            ;
-        }
-
+        // reviews of other customers must not be leaked, therefore the filter is applied on every nesting level
         if ($criteria->hasAssociation('productReviews')) {
             $association = $criteria->getAssociation('productReviews');
             $activeReviewsFilter = new MultiFilter(MultiFilter::CONNECTION_OR, [new EqualsFilter('status', true)]);
@@ -71,6 +58,20 @@ class SalesChannelProductDefinition extends ProductDefinition implements SalesCh
             }
 
             $association->addFilter($activeReviewsFilter);
+        }
+
+        if ($criteria->getNestingLevel() !== Criteria::ROOT_NESTING_LEVEL) {
+            return;
+        }
+
+        if ($criteria->getFields() === []) {
+            $criteria
+                ->addAssociation('prices')
+                ->addAssociation('unit')
+                ->addAssociation('deliveryTime')
+                ->addAssociation('cover.media')
+                ->addAssociation('tax')
+            ;
         }
     }
 

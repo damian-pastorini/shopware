@@ -34,11 +34,14 @@ use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityLoadedEvent;
 use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWriteEvent;
 use Shopware\Core\Framework\DataAbstractionLayer\PartialEntity;
 use Shopware\Core\Framework\DataAbstractionLayer\Write\Command\WriteCommand;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\PlatformRequest;
+use Shopware\Core\System\SalesChannel\Context\LanguageInfo;
 use Shopware\Core\System\SalesChannel\Entity\SalesChannelEntityLoadedEvent;
 use Shopware\Core\System\SalesChannel\SalesChannelContext;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
+use Shopware\Core\Test\Generator;
 use Shopware\Core\Test\Stub\SystemConfigService\StaticSystemConfigService;
 use Symfony\Component\HttpFoundation\HeaderBag;
 use Symfony\Component\HttpFoundation\Request;
@@ -47,6 +50,7 @@ use Symfony\Component\HttpFoundation\RequestStack;
 /**
  * @internal
  */
+#[Package('inventory')]
 #[CoversClass(ProductSubscriber::class)]
 class ProductSubscriberTest extends TestCase
 {
@@ -56,21 +60,21 @@ class ProductSubscriberTest extends TestCase
     public function testResolveCmsPageIdProviderWithLoadedEvent(Entity $entity, SystemConfigService $config, ?string $expected): void
     {
         $subscriber = new ProductSubscriber(
-            $this->createMock(ProductVariationBuilder::class),
-            $this->createMock(AbstractProductPriceCalculator::class),
-            $this->createMock(AbstractPropertyGroupSorter::class),
-            $this->createMock(ProductMaxPurchaseCalculator::class),
-            $this->createMock(IsNewDetector::class),
+            static::createStub(ProductVariationBuilder::class),
+            static::createStub(AbstractProductPriceCalculator::class),
+            static::createStub(AbstractPropertyGroupSorter::class),
+            static::createStub(ProductMaxPurchaseCalculator::class),
+            static::createStub(IsNewDetector::class),
             $config,
-            $this->createMock(ProductMeasurementUnitBuilder::class),
-            $this->createMock(AbstractMeasurementUnitConverter::class),
+            static::createStub(ProductMeasurementUnitBuilder::class),
+            static::createStub(AbstractMeasurementUnitConverter::class),
             new RequestStack(),
-            $this->createMock(Connection::class)
+            static::createStub(Connection::class)
         );
 
         /** @var EntityLoadedEvent<ProductEntity|PartialEntity> $event */
         $event = new EntityLoadedEvent(
-            $this->createMock(ProductDefinition::class),
+            static::createStub(ProductDefinition::class),
             [$entity],
             Context::createDefaultContext()
         );
@@ -84,23 +88,23 @@ class ProductSubscriberTest extends TestCase
     public function testResolveCmsPageIdProviderWithSalesChannelLoadedEvent(Entity $entity, SystemConfigService $config, ?string $expected): void
     {
         $subscriber = new ProductSubscriber(
-            $this->createMock(ProductVariationBuilder::class),
-            $this->createMock(AbstractProductPriceCalculator::class),
-            $this->createMock(AbstractPropertyGroupSorter::class),
-            $this->createMock(ProductMaxPurchaseCalculator::class),
-            $this->createMock(IsNewDetector::class),
+            static::createStub(ProductVariationBuilder::class),
+            static::createStub(AbstractProductPriceCalculator::class),
+            static::createStub(AbstractPropertyGroupSorter::class),
+            static::createStub(ProductMaxPurchaseCalculator::class),
+            static::createStub(IsNewDetector::class),
             $config,
-            $this->createMock(ProductMeasurementUnitBuilder::class),
-            $this->createMock(AbstractMeasurementUnitConverter::class),
+            static::createStub(ProductMeasurementUnitBuilder::class),
+            static::createStub(AbstractMeasurementUnitConverter::class),
             new RequestStack(),
-            $this->createMock(Connection::class)
+            static::createStub(Connection::class)
         );
 
         /** @var SalesChannelEntityLoadedEvent<ProductEntity|PartialEntity> $event */
         $event = new SalesChannelEntityLoadedEvent(
-            $this->createMock(SalesChannelProductDefinition::class),
+            static::createStub(SalesChannelProductDefinition::class),
             [$entity],
-            $this->createMock(SalesChannelContext::class)
+            static::createStub(SalesChannelContext::class)
         );
 
         $subscriber->salesChannelLoaded($event);
@@ -207,7 +211,7 @@ class ProductSubscriberTest extends TestCase
         $productVariationBuilder->expects($this->once())->method('build');
 
         $propertyGroupSorter = $this->createMock(AbstractPropertyGroupSorter::class);
-        $propertyGroupSorter->expects($this->once())->method('sort');
+        $propertyGroupSorter->expects($this->once())->method('sortUsingLocaleCode');
 
         $subscriber = new ProductSubscriber(
             $productVariationBuilder,
@@ -215,11 +219,11 @@ class ProductSubscriberTest extends TestCase
             $propertyGroupSorter,
             $maxPurchaseCalculator,
             $isNewDetector,
-            $this->createMock(SystemConfigService::class),
-            $this->createMock(ProductMeasurementUnitBuilder::class),
-            $this->createMock(AbstractMeasurementUnitConverter::class),
+            static::createStub(SystemConfigService::class),
+            static::createStub(ProductMeasurementUnitBuilder::class),
+            static::createStub(AbstractMeasurementUnitConverter::class),
             new RequestStack(),
-            $this->createMock(Connection::class)
+            static::createStub(Connection::class)
         );
 
         $cheapestPrice = new CheapestPriceContainer([]);
@@ -230,11 +234,14 @@ class ProductSubscriberTest extends TestCase
             'cheapestPrice' => $cheapestPrice,
         ]);
 
+        $languageInfo = new LanguageInfo('English', 'en-GB');
+        $salesChannelContext = Generator::generateSalesChannelContext(languageInfo: $languageInfo);
+
         /** @var SalesChannelEntityLoadedEvent<ProductEntity|PartialEntity> $event */
         $event = new SalesChannelEntityLoadedEvent(
-            $this->createMock(ProductDefinition::class),
+            static::createStub(ProductDefinition::class),
             [$entity],
-            $this->createMock(SalesChannelContext::class)
+            $salesChannelContext
         );
 
         $subscriber->salesChannelLoaded($event);
@@ -251,7 +258,7 @@ class ProductSubscriberTest extends TestCase
 
     public function testLoadedWithAdminContextConvertsUnits(): void
     {
-        $measurementUnitConverter = $this->createMock(AbstractMeasurementUnitConverter::class);
+        $measurementUnitConverter = static::createStub(AbstractMeasurementUnitConverter::class);
 
         $measurementBuilder = $this->createMock(ProductMeasurementUnitBuilder::class);
 
@@ -264,16 +271,16 @@ class ProductSubscriberTest extends TestCase
         $requestStack->push($request);
 
         $subscriber = new ProductSubscriber(
-            $this->createMock(ProductVariationBuilder::class),
-            $this->createMock(AbstractProductPriceCalculator::class),
-            $this->createMock(AbstractPropertyGroupSorter::class),
-            $this->createMock(ProductMaxPurchaseCalculator::class),
-            $this->createMock(IsNewDetector::class),
+            static::createStub(ProductVariationBuilder::class),
+            static::createStub(AbstractProductPriceCalculator::class),
+            static::createStub(AbstractPropertyGroupSorter::class),
+            static::createStub(ProductMaxPurchaseCalculator::class),
+            static::createStub(IsNewDetector::class),
             new StaticSystemConfigService(),
             $measurementBuilder,
             $measurementUnitConverter,
             $requestStack,
-            $this->createMock(Connection::class)
+            static::createStub(Connection::class)
         );
 
         $product = (new ProductEntity())->assign([
@@ -287,7 +294,7 @@ class ProductSubscriberTest extends TestCase
         $measurementBuilder->expects($this->exactly(1))
             ->method('build')
             ->with($product, 'ft', 'lb')
-            ->willReturnCallback(function (ProductEntity $product, $from, $to) {
+            ->willReturnCallback(static function (ProductEntity $product, $from, $to) {
                 // Simulate conversion logic
                 // For the sake of this example, we will just double the value
 
@@ -304,7 +311,7 @@ class ProductSubscriberTest extends TestCase
 
         /** @var EntityLoadedEvent<ProductEntity|PartialEntity> $event */
         $event = new EntityLoadedEvent(
-            $this->createMock(ProductDefinition::class),
+            static::createStub(ProductDefinition::class),
             [$product],
             $context
         );
@@ -319,7 +326,7 @@ class ProductSubscriberTest extends TestCase
 
     public function testLoadedWithNonAdminContextDoesNotConvertUnits(): void
     {
-        $measurementUnitConverter = $this->createMock(AbstractMeasurementUnitConverter::class);
+        $measurementUnitConverter = static::createStub(AbstractMeasurementUnitConverter::class);
         $measurementUnitBuilder = $this->createMock(ProductMeasurementUnitBuilder::class);
         $measurementUnitBuilder->expects($this->never())->method('build');
 
@@ -332,16 +339,16 @@ class ProductSubscriberTest extends TestCase
         $requestStack->push($request);
 
         $subscriber = new ProductSubscriber(
-            $this->createMock(ProductVariationBuilder::class),
-            $this->createMock(AbstractProductPriceCalculator::class),
-            $this->createMock(AbstractPropertyGroupSorter::class),
-            $this->createMock(ProductMaxPurchaseCalculator::class),
-            $this->createMock(IsNewDetector::class),
+            static::createStub(ProductVariationBuilder::class),
+            static::createStub(AbstractProductPriceCalculator::class),
+            static::createStub(AbstractPropertyGroupSorter::class),
+            static::createStub(ProductMaxPurchaseCalculator::class),
+            static::createStub(IsNewDetector::class),
             new StaticSystemConfigService(),
             $measurementUnitBuilder,
             $measurementUnitConverter,
             $requestStack,
-            $this->createMock(Connection::class)
+            static::createStub(Connection::class)
         );
 
         $product = (new ProductEntity())->assign([
@@ -356,7 +363,7 @@ class ProductSubscriberTest extends TestCase
 
         /** @var EntityLoadedEvent<ProductEntity|PartialEntity> $event */
         $event = new EntityLoadedEvent(
-            $this->createMock(ProductDefinition::class),
+            static::createStub(ProductDefinition::class),
             [$product],
             $context
         );
@@ -371,7 +378,7 @@ class ProductSubscriberTest extends TestCase
     }
 
     /**
-     * @param array<string, float> $productDimensions
+     * @param array<string, float|string|null> $productDimensions
      * @param array<string, string> $headers
      * @param array<string, ConvertedUnit> $expectedFinalValues
      */
@@ -382,7 +389,7 @@ class ProductSubscriberTest extends TestCase
         int $expectedConversions,
         array $expectedFinalValues
     ): void {
-        $measurementUnitConverter = $this->createMock(AbstractMeasurementUnitConverter::class);
+        $measurementUnitConverter = static::createStub(AbstractMeasurementUnitConverter::class);
         $measurementBuilder = $this->createMock(ProductMeasurementUnitBuilder::class);
 
         $requestStack = new RequestStack();
@@ -396,7 +403,7 @@ class ProductSubscriberTest extends TestCase
             $measurementBuilder->expects($this->exactly(1))
                 ->method('build')
                 ->with($product, $headers[PlatformRequest::HEADER_MEASUREMENT_LENGTH_UNIT] ?? 'mm', $headers[PlatformRequest::HEADER_MEASUREMENT_WEIGHT_UNIT] ?? 'kg')
-                ->willReturnCallback(function (ProductEntity $product, $from, $to) {
+                ->willReturnCallback(static function (ProductEntity $product, $from, $to) {
                     // Simulate conversion logic
                     // For the sake of this example, we will just double the value
 
@@ -413,23 +420,23 @@ class ProductSubscriberTest extends TestCase
         }
 
         $subscriber = new ProductSubscriber(
-            $this->createMock(ProductVariationBuilder::class),
-            $this->createMock(AbstractProductPriceCalculator::class),
-            $this->createMock(AbstractPropertyGroupSorter::class),
-            $this->createMock(ProductMaxPurchaseCalculator::class),
-            $this->createMock(IsNewDetector::class),
+            static::createStub(ProductVariationBuilder::class),
+            static::createStub(AbstractProductPriceCalculator::class),
+            static::createStub(AbstractPropertyGroupSorter::class),
+            static::createStub(ProductMaxPurchaseCalculator::class),
+            static::createStub(IsNewDetector::class),
             new StaticSystemConfigService(),
             $measurementBuilder,
             $measurementUnitConverter,
             $requestStack,
-            $this->createMock(Connection::class)
+            static::createStub(Connection::class)
         );
 
         $context = Context::createDefaultContext(new AdminApiSource('user-id', 'integration-id'));
 
         /** @var EntityLoadedEvent<ProductEntity|PartialEntity> $event */
         $event = new EntityLoadedEvent(
-            $this->createMock(ProductDefinition::class),
+            static::createStub(ProductDefinition::class),
             [$product],
             $context
         );
@@ -542,16 +549,16 @@ class ProductSubscriberTest extends TestCase
         $requestStack = new RequestStack(); // No request pushed
 
         $subscriber = new ProductSubscriber(
-            $this->createMock(ProductVariationBuilder::class),
-            $this->createMock(AbstractProductPriceCalculator::class),
-            $this->createMock(AbstractPropertyGroupSorter::class),
-            $this->createMock(ProductMaxPurchaseCalculator::class),
-            $this->createMock(IsNewDetector::class),
+            static::createStub(ProductVariationBuilder::class),
+            static::createStub(AbstractProductPriceCalculator::class),
+            static::createStub(AbstractPropertyGroupSorter::class),
+            static::createStub(ProductMaxPurchaseCalculator::class),
+            static::createStub(IsNewDetector::class),
             new StaticSystemConfigService(),
-            $this->createMock(ProductMeasurementUnitBuilder::class),
+            static::createStub(ProductMeasurementUnitBuilder::class),
             $measurementUnitConverter,
             $requestStack,
-            $this->createMock(Connection::class)
+            static::createStub(Connection::class)
         );
 
         $product = (new ProductEntity())->assign([
@@ -565,7 +572,7 @@ class ProductSubscriberTest extends TestCase
 
         /** @var EntityLoadedEvent<ProductEntity|PartialEntity> $event */
         $event = new EntityLoadedEvent(
-            $this->createMock(ProductDefinition::class),
+            static::createStub(ProductDefinition::class),
             [$product],
             $context
         );
@@ -583,7 +590,7 @@ class ProductSubscriberTest extends TestCase
         $measurementUnitConverter = $this->createMock(AbstractMeasurementUnitConverter::class);
         $measurementUnitConverter->expects($this->exactly(4))
             ->method('convert')
-            ->willReturnCallback(function ($value, $from, $to) {
+            ->willReturnCallback(static function ($value, $from, $to) {
                 return new ConvertedUnit($value * 2.0, $to);
             });
 
@@ -596,16 +603,16 @@ class ProductSubscriberTest extends TestCase
         $requestStack->push($request);
 
         $subscriber = new ProductSubscriber(
-            $this->createMock(ProductVariationBuilder::class),
-            $this->createMock(AbstractProductPriceCalculator::class),
-            $this->createMock(AbstractPropertyGroupSorter::class),
-            $this->createMock(ProductMaxPurchaseCalculator::class),
-            $this->createMock(IsNewDetector::class),
+            static::createStub(ProductVariationBuilder::class),
+            static::createStub(AbstractProductPriceCalculator::class),
+            static::createStub(AbstractPropertyGroupSorter::class),
+            static::createStub(ProductMaxPurchaseCalculator::class),
+            static::createStub(IsNewDetector::class),
             new StaticSystemConfigService(),
-            $this->createMock(ProductMeasurementUnitBuilder::class),
+            static::createStub(ProductMeasurementUnitBuilder::class),
             $measurementUnitConverter,
             $requestStack,
-            $this->createMock(Connection::class)
+            static::createStub(Connection::class)
         );
 
         $command = $this->createMock(WriteCommand::class);
@@ -621,14 +628,14 @@ class ProductSubscriberTest extends TestCase
 
         $command->expects($this->exactly(4))
             ->method('hasField')
-            ->willReturnCallback(function ($field) {
+            ->willReturnCallback(static function ($field) {
                 return \in_array($field, ['width', 'height', 'length', 'weight'], true);
             });
 
         $addPayloadCallCount = 0;
         $command->expects($this->exactly(4))
             ->method('addPayload')
-            ->willReturnCallback(function ($field, $value) use (&$addPayloadCallCount): void {
+            ->willReturnCallback(static function ($field, $value) use (&$addPayloadCallCount): void {
                 $expectedValues = [
                     'width' => 20.0,
                     'height' => 40.0,
@@ -660,16 +667,16 @@ class ProductSubscriberTest extends TestCase
         $requestStack->push($request);
 
         $subscriber = new ProductSubscriber(
-            $this->createMock(ProductVariationBuilder::class),
-            $this->createMock(AbstractProductPriceCalculator::class),
-            $this->createMock(AbstractPropertyGroupSorter::class),
-            $this->createMock(ProductMaxPurchaseCalculator::class),
-            $this->createMock(IsNewDetector::class),
+            static::createStub(ProductVariationBuilder::class),
+            static::createStub(AbstractProductPriceCalculator::class),
+            static::createStub(AbstractPropertyGroupSorter::class),
+            static::createStub(ProductMaxPurchaseCalculator::class),
+            static::createStub(IsNewDetector::class),
             new StaticSystemConfigService(),
-            $this->createMock(ProductMeasurementUnitBuilder::class),
+            static::createStub(ProductMeasurementUnitBuilder::class),
             $measurementUnitConverter,
             $requestStack,
-            $this->createMock(Connection::class)
+            static::createStub(Connection::class)
         );
 
         $command = $this->createMock(WriteCommand::class);
@@ -699,16 +706,16 @@ class ProductSubscriberTest extends TestCase
         $requestStack->push($request);
 
         $subscriber = new ProductSubscriber(
-            $this->createMock(ProductVariationBuilder::class),
-            $this->createMock(AbstractProductPriceCalculator::class),
-            $this->createMock(AbstractPropertyGroupSorter::class),
-            $this->createMock(ProductMaxPurchaseCalculator::class),
-            $this->createMock(IsNewDetector::class),
+            static::createStub(ProductVariationBuilder::class),
+            static::createStub(AbstractProductPriceCalculator::class),
+            static::createStub(AbstractPropertyGroupSorter::class),
+            static::createStub(ProductMaxPurchaseCalculator::class),
+            static::createStub(IsNewDetector::class),
             new StaticSystemConfigService(),
-            $this->createMock(ProductMeasurementUnitBuilder::class),
+            static::createStub(ProductMeasurementUnitBuilder::class),
             $measurementUnitConverter,
             $requestStack,
-            $this->createMock(Connection::class)
+            static::createStub(Connection::class)
         );
 
         $event = $this->createMock(EntityWriteEvent::class);
@@ -721,7 +728,7 @@ class ProductSubscriberTest extends TestCase
     }
 
     /**
-     * @param array<string, float> $payload
+     * @param array<string, float|string> $payload
      * @param array<string, string> $headers
      * @param array<string, bool> $hasFieldReturns
      * @param array<string, float> $expectedConversions
@@ -735,7 +742,7 @@ class ProductSubscriberTest extends TestCase
     ): void {
         $measurementUnitConverter = $this->createMock(AbstractMeasurementUnitConverter::class);
 
-        if (!empty($expectedConversions)) {
+        if ($expectedConversions !== []) {
             $measurementUnitConverter->expects($this->exactly(\count($expectedConversions)))
                 ->method('convert')
                 ->willReturn(new ConvertedUnit(2.0, 'm'));
@@ -749,16 +756,16 @@ class ProductSubscriberTest extends TestCase
         $requestStack->push($request);
 
         $subscriber = new ProductSubscriber(
-            $this->createMock(ProductVariationBuilder::class),
-            $this->createMock(AbstractProductPriceCalculator::class),
-            $this->createMock(AbstractPropertyGroupSorter::class),
-            $this->createMock(ProductMaxPurchaseCalculator::class),
-            $this->createMock(IsNewDetector::class),
+            static::createStub(ProductVariationBuilder::class),
+            static::createStub(AbstractProductPriceCalculator::class),
+            static::createStub(AbstractPropertyGroupSorter::class),
+            static::createStub(ProductMaxPurchaseCalculator::class),
+            static::createStub(IsNewDetector::class),
             new StaticSystemConfigService(),
-            $this->createMock(ProductMeasurementUnitBuilder::class),
+            static::createStub(ProductMeasurementUnitBuilder::class),
             $measurementUnitConverter,
             $requestStack,
-            $this->createMock(Connection::class)
+            static::createStub(Connection::class)
         );
 
         $command = $this->createMock(WriteCommand::class);
@@ -767,13 +774,12 @@ class ProductSubscriberTest extends TestCase
             ->method('getPayload')
             ->willReturn($payload);
 
-        $command->expects($this->any())
-            ->method('hasField')
-            ->willReturnCallback(function ($field) use ($hasFieldReturns) {
+        $command->method('hasField')
+            ->willReturnCallback(static function ($field) use ($hasFieldReturns) {
                 return $hasFieldReturns[$field] ?? false;
             });
 
-        if (!empty($expectedConversions)) {
+        if ($expectedConversions !== []) {
             $command->expects($this->exactly(\count($expectedConversions)))
                 ->method('addPayload');
         } else {
@@ -838,16 +844,16 @@ class ProductSubscriberTest extends TestCase
         $requestStack = new RequestStack(); // No request pushed
 
         $subscriber = new ProductSubscriber(
-            $this->createMock(ProductVariationBuilder::class),
-            $this->createMock(AbstractProductPriceCalculator::class),
-            $this->createMock(AbstractPropertyGroupSorter::class),
-            $this->createMock(ProductMaxPurchaseCalculator::class),
-            $this->createMock(IsNewDetector::class),
+            static::createStub(ProductVariationBuilder::class),
+            static::createStub(AbstractProductPriceCalculator::class),
+            static::createStub(AbstractPropertyGroupSorter::class),
+            static::createStub(ProductMaxPurchaseCalculator::class),
+            static::createStub(IsNewDetector::class),
             new StaticSystemConfigService(),
-            $this->createMock(ProductMeasurementUnitBuilder::class),
+            static::createStub(ProductMeasurementUnitBuilder::class),
             $measurementUnitConverter,
             $requestStack,
-            $this->createMock(Connection::class)
+            static::createStub(Connection::class)
         );
 
         $command = $this->createMock(WriteCommand::class);
@@ -870,14 +876,14 @@ class ProductSubscriberTest extends TestCase
         $connection->expects($this->never())->method('executeStatement');
 
         $subscriber = new ProductSubscriber(
-            $this->createMock(ProductVariationBuilder::class),
-            $this->createMock(AbstractProductPriceCalculator::class),
-            $this->createMock(AbstractPropertyGroupSorter::class),
-            $this->createMock(ProductMaxPurchaseCalculator::class),
-            $this->createMock(IsNewDetector::class),
+            static::createStub(ProductVariationBuilder::class),
+            static::createStub(AbstractProductPriceCalculator::class),
+            static::createStub(AbstractPropertyGroupSorter::class),
+            static::createStub(ProductMaxPurchaseCalculator::class),
+            static::createStub(IsNewDetector::class),
             new StaticSystemConfigService(),
-            $this->createMock(ProductMeasurementUnitBuilder::class),
-            $this->createMock(AbstractMeasurementUnitConverter::class),
+            static::createStub(ProductMeasurementUnitBuilder::class),
+            static::createStub(AbstractMeasurementUnitConverter::class),
             new RequestStack(),
             $connection
         );
@@ -904,14 +910,14 @@ class ProductSubscriberTest extends TestCase
         $connection->expects($this->never())->method('executeStatement');
 
         $subscriber = new ProductSubscriber(
-            $this->createMock(ProductVariationBuilder::class),
-            $this->createMock(AbstractProductPriceCalculator::class),
-            $this->createMock(AbstractPropertyGroupSorter::class),
-            $this->createMock(ProductMaxPurchaseCalculator::class),
-            $this->createMock(IsNewDetector::class),
+            static::createStub(ProductVariationBuilder::class),
+            static::createStub(AbstractProductPriceCalculator::class),
+            static::createStub(AbstractPropertyGroupSorter::class),
+            static::createStub(ProductMaxPurchaseCalculator::class),
+            static::createStub(IsNewDetector::class),
             new StaticSystemConfigService(),
-            $this->createMock(ProductMeasurementUnitBuilder::class),
-            $this->createMock(AbstractMeasurementUnitConverter::class),
+            static::createStub(ProductMeasurementUnitBuilder::class),
+            static::createStub(AbstractMeasurementUnitConverter::class),
             new RequestStack(),
             $connection
         );
@@ -952,14 +958,14 @@ class ProductSubscriberTest extends TestCase
             );
 
         $subscriber = new ProductSubscriber(
-            $this->createMock(ProductVariationBuilder::class),
-            $this->createMock(AbstractProductPriceCalculator::class),
-            $this->createMock(AbstractPropertyGroupSorter::class),
-            $this->createMock(ProductMaxPurchaseCalculator::class),
-            $this->createMock(IsNewDetector::class),
+            static::createStub(ProductVariationBuilder::class),
+            static::createStub(AbstractProductPriceCalculator::class),
+            static::createStub(AbstractPropertyGroupSorter::class),
+            static::createStub(ProductMaxPurchaseCalculator::class),
+            static::createStub(IsNewDetector::class),
             new StaticSystemConfigService(),
-            $this->createMock(ProductMeasurementUnitBuilder::class),
-            $this->createMock(AbstractMeasurementUnitConverter::class),
+            static::createStub(ProductMeasurementUnitBuilder::class),
+            static::createStub(AbstractMeasurementUnitConverter::class),
             new RequestStack(),
             $connection
         );
@@ -979,7 +985,7 @@ class ProductSubscriberTest extends TestCase
         $successCallback = null;
         $event->expects($this->once())
             ->method('addSuccess')
-            ->willReturnCallback(function ($callback) use (&$successCallback): void {
+            ->willReturnCallback(static function ($callback) use (&$successCallback): void {
                 $successCallback = $callback;
             });
 
@@ -1016,14 +1022,14 @@ class ProductSubscriberTest extends TestCase
             );
 
         $subscriber = new ProductSubscriber(
-            $this->createMock(ProductVariationBuilder::class),
-            $this->createMock(AbstractProductPriceCalculator::class),
-            $this->createMock(AbstractPropertyGroupSorter::class),
-            $this->createMock(ProductMaxPurchaseCalculator::class),
-            $this->createMock(IsNewDetector::class),
+            static::createStub(ProductVariationBuilder::class),
+            static::createStub(AbstractProductPriceCalculator::class),
+            static::createStub(AbstractPropertyGroupSorter::class),
+            static::createStub(ProductMaxPurchaseCalculator::class),
+            static::createStub(IsNewDetector::class),
             new StaticSystemConfigService(),
-            $this->createMock(ProductMeasurementUnitBuilder::class),
-            $this->createMock(AbstractMeasurementUnitConverter::class),
+            static::createStub(ProductMeasurementUnitBuilder::class),
+            static::createStub(AbstractMeasurementUnitConverter::class),
             new RequestStack(),
             $connection
         );
@@ -1043,7 +1049,7 @@ class ProductSubscriberTest extends TestCase
         $successCallback = null;
         $event->expects($this->once())
             ->method('addSuccess')
-            ->willReturnCallback(function ($callback) use (&$successCallback): void {
+            ->willReturnCallback(static function ($callback) use (&$successCallback): void {
                 $successCallback = $callback;
             });
 

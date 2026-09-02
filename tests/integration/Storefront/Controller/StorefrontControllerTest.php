@@ -4,6 +4,7 @@ namespace Shopware\Tests\Integration\Storefront\Controller;
 
 use PHPUnit\Framework\TestCase;
 use Shopware\Core\Framework\Context;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Test\TestCaseBase\DatabaseTransactionBehaviour;
 use Shopware\Core\Framework\Test\TestCaseBase\KernelTestBehaviour;
 use Shopware\Core\Framework\Test\TestCaseBase\RequestStackTestBehaviour;
@@ -15,6 +16,7 @@ use Shopware\Storefront\Test\Controller\StorefrontControllerTestBehaviour;
 /**
  * @internal
  */
+#[Package('discovery')]
 class StorefrontControllerTest extends TestCase
 {
     use DatabaseTransactionBehaviour;
@@ -101,6 +103,7 @@ class StorefrontControllerTest extends TestCase
         );
 
         preg_match('/window\.activeRouteParameters = \'([^\']*)\';/', $content, $matches);
+        static::assertArrayHasKey(1, $matches);
         $escapedJson = $matches[1];
 
         // Verify dangerous characters are properly escaped

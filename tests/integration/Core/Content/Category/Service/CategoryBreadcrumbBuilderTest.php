@@ -4,7 +4,6 @@ namespace Shopware\Tests\Integration\Core\Content\Category\Service;
 
 use Doctrine\DBAL\Connection;
 use PHPUnit\Framework\Attributes\DataProvider;
-use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Shopware\Core\Content\Category\CategoryCollection;
 use Shopware\Core\Content\Category\CategoryDefinition;
@@ -12,6 +11,7 @@ use Shopware\Core\Content\Category\CategoryEntity;
 use Shopware\Core\Content\Category\Service\CategoryBreadcrumbBuilder;
 use Shopware\Core\Content\Product\Aggregate\ProductVisibility\ProductVisibilityDefinition;
 use Shopware\Core\Content\Product\ProductCollection;
+use Shopware\Core\Content\Product\ProductDefinition;
 use Shopware\Core\Content\Product\ProductEntity;
 use Shopware\Core\Defaults;
 use Shopware\Core\Framework\Api\Context\SystemSource;
@@ -26,6 +26,7 @@ use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\System\SalesChannel\Context\AbstractSalesChannelContextFactory;
 use Shopware\Core\System\SalesChannel\Context\SalesChannelContextFactory;
 use Shopware\Core\System\SalesChannel\SalesChannelContext;
+use Shopware\Core\System\Tax\TaxCollection;
 use Shopware\Core\Test\Stub\Framework\IdsCollection;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 
@@ -57,6 +58,11 @@ class CategoryBreadcrumbBuilderTest extends TestCase
      */
     private EntityRepository $productRepository;
 
+    /**
+     * @var EntityRepository<TaxCollection>
+     */
+    private EntityRepository $taxRepository;
+
     private KernelBrowser $browser;
 
     private AbstractSalesChannelContextFactory $contextFactory;
@@ -78,6 +84,18 @@ class CategoryBreadcrumbBuilderTest extends TestCase
 
         $this->categoryRepository = static::getContainer()->get('category.repository');
         $this->productRepository = static::getContainer()->get('product.repository');
+        $this->taxRepository = static::getContainer()->get('tax.repository');
+
+        $this->taxRepository->create(
+            [
+                [
+                    'id' => $this->ids->create('tax'),
+                    'taxRate' => 19,
+                    'name' => 'tax',
+                ],
+            ],
+            Context::createDefaultContext()
+        );
 
         $this->contextFactory = static::getContainer()->get(SalesChannelContextFactory::class);
         $this->salesChannelContext = $this->contextFactory->create('', $this->ids->get('sales-channel'));
@@ -118,7 +136,6 @@ class CategoryBreadcrumbBuilderTest extends TestCase
     }
 
     #[DataProvider('breadcrumbDataProvider')]
-    #[Group('slow')]
     public function testIsWithoutEntrypoint(string $key, bool $withSalesChannel, bool $withCategoryId = false): void
     {
         $categoryId = $withCategoryId ? $this->ids->get($key) : null;
@@ -178,7 +195,6 @@ class CategoryBreadcrumbBuilderTest extends TestCase
     }
 
     #[DataProvider('seoCategoryProvider')]
-    #[Group('slow')]
     public function testItHasSeoCategory(bool $hasCategories, bool $hasMainCategory, bool $hasMainCategory2ndChannel): void
     {
         $this->createTestData('navigation-sc2');
@@ -201,6 +217,7 @@ class CategoryBreadcrumbBuilderTest extends TestCase
                 'active' => true,
                 'weight' => 999,
                 'visibilities' => [
+                    ['salesChannelId' => $this->ids->get('sales-channel'), 'visibility' => ProductVisibilityDefinition::VISIBILITY_ALL],
                     ['salesChannelId' => $this->ids->get('sales-channel-2'), 'visibility' => ProductVisibilityDefinition::VISIBILITY_ALL],
                 ],
             ],
@@ -237,7 +254,7 @@ class CategoryBreadcrumbBuilderTest extends TestCase
         $criteria->addAssociation('categories');
 
         /** @var ProductEntity $product */
-        $product = $this->productRepository->search($criteria, Context::createDefaultContext())->first();
+        $product = $this->productRepository->search($criteria, Context::createDefaultContext())->getEntities()->first();
 
         $this->createProductStreams();
         $this->createCategoryStreams();
@@ -271,7 +288,6 @@ class CategoryBreadcrumbBuilderTest extends TestCase
         }
     }
 
-    #[Group('slow')]
     public function testApiResponseHasSeoCategory(): void
     {
         $this->createTestData('navigation-test');
@@ -311,7 +327,6 @@ class CategoryBreadcrumbBuilderTest extends TestCase
         static::assertSame($this->ids->get('navigation-a-2'), $json['product']['seoCategory']['id']);
     }
 
-    #[Group('slow')]
     public function testSeoCategoryInheritance(): void
     {
         $optionIds = [
@@ -453,7 +468,7 @@ class CategoryBreadcrumbBuilderTest extends TestCase
         $this->updateProductStream($this->ids->get('variant-product-3'), $this->ids->get('stream_id_1'));
 
         /** @var ProductEntity $mainProduct */
-        $mainProduct = $this->productRepository->search($this->createSeoCriteria([$this->ids->get('variant-product')]), Context::createDefaultContext())->first();
+        $mainProduct = $this->productRepository->search($this->createSeoCriteria([$this->ids->get('variant-product')]), Context::createDefaultContext())->getEntities()->first();
         $categoryMain = $this->breadcrumbBuilder->getProductSeoCategory($mainProduct, $this->salesChannelContext);
 
         static::assertInstanceOf(CategoryEntity::class, $categoryMain);
@@ -461,7 +476,7 @@ class CategoryBreadcrumbBuilderTest extends TestCase
         static::assertSame('EN-AA', $categoryMain->getName());
 
         /** @var ProductEntity $variant1 */
-        $variant1 = $this->productRepository->search($this->createSeoCriteria([$this->ids->get('variant-product-1')]), Context::createDefaultContext())->first();
+        $variant1 = $this->productRepository->search($this->createSeoCriteria([$this->ids->get('variant-product-1')]), Context::createDefaultContext())->getEntities()->first();
         $categoryVariant1 = $this->breadcrumbBuilder->getProductSeoCategory($variant1, $this->salesChannelContext);
 
         static::assertInstanceOf(CategoryEntity::class, $categoryVariant1);
@@ -469,7 +484,7 @@ class CategoryBreadcrumbBuilderTest extends TestCase
         static::assertSame('EN-BA', $categoryVariant1->getName());
 
         /** @var ProductEntity $variant2 */
-        $variant2 = $this->productRepository->search($this->createSeoCriteria([$this->ids->get('variant-product-2')]), Context::createDefaultContext())->first();
+        $variant2 = $this->productRepository->search($this->createSeoCriteria([$this->ids->get('variant-product-2')]), Context::createDefaultContext())->getEntities()->first();
         $categoryVariant2 = $this->breadcrumbBuilder->getProductSeoCategory($variant2, $this->salesChannelContext);
 
         static::assertInstanceOf(CategoryEntity::class, $categoryVariant2);
@@ -477,7 +492,7 @@ class CategoryBreadcrumbBuilderTest extends TestCase
         static::assertSame('EN-B', $categoryVariant2->getName());
 
         /** @var ProductEntity $variant3 */
-        $variant3 = $this->productRepository->search($this->createSeoCriteria([$this->ids->get('variant-product-3')]), Context::createDefaultContext())->first();
+        $variant3 = $this->productRepository->search($this->createSeoCriteria([$this->ids->get('variant-product-3')]), Context::createDefaultContext())->getEntities()->first();
         $categoryVariant3 = $this->breadcrumbBuilder->getProductSeoCategory($variant3, $this->salesChannelContext);
 
         static::assertInstanceOf(CategoryEntity::class, $categoryVariant3);
@@ -485,7 +500,7 @@ class CategoryBreadcrumbBuilderTest extends TestCase
         static::assertSame('EN-A', $categoryVariant3->getName());
 
         /** @var ProductEntity $variant4 */
-        $variant4 = $this->productRepository->search($this->createSeoCriteria([$this->ids->get('variant-product-4')]), Context::createDefaultContext())->first();
+        $variant4 = $this->productRepository->search($this->createSeoCriteria([$this->ids->get('variant-product-4')]), Context::createDefaultContext())->getEntities()->first();
         $categoryVariant4 = $this->breadcrumbBuilder->getProductSeoCategory($variant4, $this->salesChannelContext);
 
         static::assertInstanceOf(CategoryEntity::class, $categoryVariant4);
@@ -493,7 +508,6 @@ class CategoryBreadcrumbBuilderTest extends TestCase
         static::assertSame('EN-AA', $categoryVariant4->getName());
     }
 
-    #[Group('slow')]
     public function testGetProductSeoCategoryWithInactiveCategory(): void
     {
         // create and retrieve product and categories
@@ -513,7 +527,7 @@ class CategoryBreadcrumbBuilderTest extends TestCase
         $criteria = new Criteria([$this->ids->get('seo-product')]);
         $criteria->addAssociation('categories');
         /** @var ProductEntity $product */
-        $product = $this->productRepository->search($criteria, Context::createDefaultContext())->first();
+        $product = $this->productRepository->search($criteria, Context::createDefaultContext())->getEntities()->first();
 
         // test if you get at least one category if both are active
         $seoCategory = $this->breadcrumbBuilder->getProductSeoCategory($product, $this->salesChannelContext);
@@ -608,7 +622,7 @@ class CategoryBreadcrumbBuilderTest extends TestCase
                 'name' => 'amazing brand',
             ],
             'productNumber' => 'P1234',
-            'tax' => ['id' => Uuid::randomHex(), 'taxRate' => 19, 'name' => 'tax'],
+            'taxId' => $this->ids->get('tax'),
             'price' => [
                 [
                     'currencyId' => Defaults::CURRENCY,
@@ -620,6 +634,7 @@ class CategoryBreadcrumbBuilderTest extends TestCase
             'stock' => 0,
             'weight' => 998,
             'active' => true,
+            'type' => ProductDefinition::TYPE_PHYSICAL,
             'visibilities' => [
                 ['salesChannelId' => $this->ids->get('sales-channel'), 'visibility' => ProductVisibilityDefinition::VISIBILITY_ALL],
             ],

@@ -5,12 +5,15 @@ namespace Shopware\Tests\Unit\Core\Service;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Service\AppInfo;
+use Shopware\Core\Service\Requirement\ServiceConsentRequirement;
 use Shopware\Core\Service\ServiceException;
 
 /**
  * @internal
  */
+#[Package('framework')]
 #[CoversClass(AppInfo::class)]
 class AppInfoTest extends TestCase
 {
@@ -85,6 +88,7 @@ class AppInfoTest extends TestCase
             'app-zip-url' => 'https://example.com/zip',
             'app-hash-algorithm' => 'sha256',
             'app-min-shop-supported-version' => '6.6.0.0',
+            'app-requirements' => ['service_consent'],
         ]);
 
         static::assertSame('TestApp', $appInfo->name);
@@ -94,11 +98,56 @@ class AppInfoTest extends TestCase
         static::assertSame('https://example.com/zip', $appInfo->zipUrl);
         static::assertSame('sha256', $appInfo->hashAlgorithm);
         static::assertSame('6.6.0.0', $appInfo->minShopwareSupportedVersion);
+        static::assertSame(['service_consent'], $appInfo->requirements);
+    }
+
+    public function testFromRegistryResponseParsesRequirements(): void
+    {
+        $appInfo = AppInfo::fromRegistryResponse('TestApp', [
+            'app-version' => '1.0.0',
+            'app-hash' => 'a453f',
+            'app-revision' => '1.0.0-a453f',
+            'app-zip-url' => 'https://example.com/zip',
+            'app-hash-algorithm' => 'sha256',
+            'app-min-shop-supported-version' => '6.6.0.0',
+            'app-requirements' => ['service_consent', 'shopware_account'],
+        ]);
+
+        static::assertSame(['service_consent', 'shopware_account'], $appInfo->requirements);
+    }
+
+    public function testFromRegistryResponseUsesDefaultRequirementsWhenMissing(): void
+    {
+        $appInfo = AppInfo::fromRegistryResponse('TestApp', [
+            'app-version' => '1.0.0',
+            'app-hash' => 'a453f',
+            'app-revision' => '1.0.0-a453f',
+            'app-zip-url' => 'https://example.com/zip',
+            'app-hash-algorithm' => 'sha256',
+            'app-min-shop-supported-version' => '6.6.0.0',
+        ]);
+
+        static::assertSame([ServiceConsentRequirement::NAME], $appInfo->requirements);
+    }
+
+    public function testFromNameAndSourceConfigParsesRequirements(): void
+    {
+        $appInfo = AppInfo::fromNameAndSourceConfig('TestApp', [
+            'version' => '1.0.0',
+            'hash' => 'a453f',
+            'revision' => '1.0.0-a453f',
+            'zip-url' => 'https://example.com/zip',
+            'hash-algorithm' => 'sha256',
+            'min-shop-supported-version' => '6.6.0.0',
+            'requirements' => ['shopware_account'],
+        ]);
+
+        static::assertSame(['shopware_account'], $appInfo->requirements);
     }
 
     public function testToArray(): void
     {
-        $appInfo = new AppInfo('TestApp', '1.0.0', 'a453f', '1.0.0-a453f', 'https://example.com/zip', 'sha256', '6.6.0.0');
+        $appInfo = new AppInfo('TestApp', '1.0.0', 'a453f', '1.0.0-a453f', 'https://example.com/zip', ['service_consent'], 'sha256', '6.6.0.0');
 
         static::assertSame(
             [
@@ -108,8 +157,25 @@ class AppInfoTest extends TestCase
                 'zip-url' => 'https://example.com/zip',
                 'hash-algorithm' => 'sha256',
                 'min-shop-supported-version' => '6.6.0.0',
+                'requirements' => ['service_consent'],
             ],
             $appInfo->toArray()
         );
+    }
+
+    public function testToArrayIncludesRequirements(): void
+    {
+        $appInfo = new AppInfo(
+            'TestApp',
+            '1.0.0',
+            'a453f',
+            '1.0.0-a453f',
+            'https://example.com/zip',
+            ['service_consent', 'shopware_account'],
+            'sha256',
+            '6.6.0.0',
+        );
+
+        static::assertSame(['service_consent', 'shopware_account'], $appInfo->toArray()['requirements']);
     }
 }

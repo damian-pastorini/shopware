@@ -53,7 +53,9 @@ class ElasticsearchProductDefinition extends AbstractElasticsearchDefinition
      */
     public function getMapping(Context $context): array
     {
-        $languageFields = $this->fieldBuilder->translated(self::getTextFieldConfig());
+        $languageFields = $this->fieldBuilder->translated(self::buildTextFieldConfig());
+        $languageFieldsWithLengthNorm = $this->fieldBuilder->translated(self::buildTextFieldConfig(lengthNorm: true));
+        $technicalLanguageFieldsWithExact = $this->fieldBuilder->translated(self::buildTextFieldConfig(withExact: true, technicalTerms: true));
         $salesChannelByLanguage = $this->salesChannelLanguageLoader->loadLanguages();
         $allSalesChannels = array_values(array_unique(array_merge(...array_values($salesChannelByLanguage))));
 
@@ -65,15 +67,18 @@ class ElasticsearchProductDefinition extends AbstractElasticsearchDefinition
             ];
         }
 
-        $debug = $this->environment !== 'prod';
+        $debug = $this->environment === 'dev' || $this->environment === 'test';
 
         $properties = [
             'id' => self::KEYWORD_FIELD,
-            'name' => $languageFields,
-            'description' => $languageFields,
+            'name' => $technicalLanguageFieldsWithExact,
+            'parent' => ElasticsearchFieldBuilder::nested([
+                'name' => $technicalLanguageFieldsWithExact,
+            ]),
+            'description' => $languageFieldsWithLengthNorm,
             'metaTitle' => $languageFields,
-            'metaDescription' => $languageFields,
-            'customSearchKeywords' => $languageFields,
+            'metaDescription' => $languageFieldsWithLengthNorm,
+            'customSearchKeywords' => $this->fieldBuilder->translated(self::buildTextFieldConfig(withExact: true, technicalTerms: true, lengthNorm: true)),
             'categories' => ElasticsearchFieldBuilder::nested([
                 'name' => $languageFields,
             ]),
@@ -106,14 +111,14 @@ class ElasticsearchProductDefinition extends AbstractElasticsearchDefinition
             'streamIds' => self::KEYWORD_FIELD,
             'autoIncrement' => self::INT_FIELD,
             'manufacturerId' => self::KEYWORD_FIELD,
-            'manufacturerNumber' => self::getTextFieldConfig(),
+            'manufacturerNumber' => self::buildTextFieldConfig(withExact: true, technicalTerms: true),
             'deliveryTimeId' => self::KEYWORD_FIELD,
             'displayGroup' => self::KEYWORD_FIELD,
-            'ean' => self::getTextFieldConfig(),
+            'ean' => self::buildTextFieldConfig(withExact: true, technicalTerms: true),
             'height' => self::FLOAT_FIELD,
             'length' => self::FLOAT_FIELD,
             'markAsTopseller' => self::BOOLEAN_FIELD,
-            'productNumber' => self::getTextFieldConfig(),
+            'productNumber' => self::buildTextFieldConfig(withExact: true, technicalTerms: true),
             'ratingAverage' => self::FLOAT_FIELD,
             'releaseDate' => ElasticsearchFieldBuilder::datetime(),
             'createdAt' => ElasticsearchFieldBuilder::datetime(),
@@ -122,7 +127,7 @@ class ElasticsearchProductDefinition extends AbstractElasticsearchDefinition
             'availableStock' => self::INT_FIELD,
             'shippingFree' => self::BOOLEAN_FIELD,
             'taxId' => self::KEYWORD_FIELD,
-            'tags' => ElasticsearchFieldBuilder::nested(['name' => self::getTextFieldConfig()]),
+            'tags' => ElasticsearchFieldBuilder::nested(['name' => self::buildTextFieldConfig()]),
             'visibilities' => ElasticsearchFieldBuilder::nested([
                 'id' => null,
                 'salesChannelId' => self::KEYWORD_FIELD,
@@ -131,14 +136,15 @@ class ElasticsearchProductDefinition extends AbstractElasticsearchDefinition
             'coverId' => self::KEYWORD_FIELD,
             'weight' => self::FLOAT_FIELD,
             'width' => self::FLOAT_FIELD,
+            'type' => self::KEYWORD_FIELD,
             'states' => self::KEYWORD_FIELD,
             'customFields' => $this->fieldBuilder->customFields($this->getEntityDefinition()->getEntityName(), $context),
             ...$visibilities,
         ];
 
+        // @deprecated tag:v6.8.0 - `product.states` is removed in v6.8, so the field is dropped from the mapping
         if (Feature::isActive('v6.8.0.0')) {
-            unset($properties['categoriesRo']);
-            unset($properties['visibilities']);
+            unset($properties['states']);
         }
 
         $mapping = [
@@ -189,7 +195,7 @@ class ElasticsearchProductDefinition extends AbstractElasticsearchDefinition
     {
         $data = $this->fetchProducts($ids, $context);
 
-        if (empty($data)) {
+        if ($data === []) {
             return [];
         }
 
@@ -219,6 +225,8 @@ class ElasticsearchProductDefinition extends AbstractElasticsearchDefinition
 
             $names = ElasticsearchFieldMapper::translated(field: 'name', items: $translation);
             $names = $this->fillFallbackTranslation($languageMapping, $names);
+            $parentNames = ElasticsearchFieldMapper::translated(field: 'parentName', items: $translation);
+            $parentNames = $this->fillFallbackTranslation($languageMapping, $parentNames);
 
             $customFields = $this->mapCustomFields(
                 variantCustomFields: ElasticsearchFieldMapper::translated(field: 'customFields', items: $translation, stripText: false),
@@ -241,7 +249,7 @@ class ElasticsearchProductDefinition extends AbstractElasticsearchDefinition
             }
 
             // no visibilities found, skip this product
-            if (empty($visibilitiesFlatten)) {
+            if ($visibilitiesFlatten === []) {
                 continue;
             }
 
@@ -255,7 +263,7 @@ class ElasticsearchProductDefinition extends AbstractElasticsearchDefinition
                 'isCloseout' => (bool) $item['isCloseout'],
                 'shippingFree' => (bool) $item['shippingFree'],
                 'markAsTopseller' => (bool) $item['markAsTopseller'],
-                'visibilities' => array_map(function (array $visibility) {
+                'visibilities' => array_map(static function (array $visibility) {
                     return array_merge([
                         '_count' => 1,
                     ], $visibility);
@@ -270,16 +278,17 @@ class ElasticsearchProductDefinition extends AbstractElasticsearchDefinition
                 'width' => (float) $item['width'],
                 'length' => (float) $item['length'],
                 'height' => (float) $item['height'],
+                'type' => $item['type'],
                 'manufacturerId' => $item['productManufacturerId'],
                 'manufacturerNumber' => $item['manufacturerNumber'],
                 'deliveryTimeId' => $item['deliveryTimeId'],
                 'releaseDate' => isset($item['releaseDate']) ? (new \DateTime($item['releaseDate']))->format('c') : null,
                 'createdAt' => isset($item['createdAt']) ? (new \DateTime($item['createdAt']))->format('c') : null,
                 'categoryTree' => ElasticsearchIndexingUtils::parseJson($item, 'categoryTree'),
-                'categoriesRo' => array_values(array_map(fn (string $categoryId) => ['id' => $categoryId, '_count' => 1], ElasticsearchIndexingUtils::parseJson($item, 'categoryTree'))),
+                'categoriesRo' => array_values(array_map(static fn (string $categoryId) => ['id' => $categoryId, '_count' => 1], ElasticsearchIndexingUtils::parseJson($item, 'categoryTree'))),
                 'taxId' => $item['taxId'],
-                'tags' => array_filter(array_map(function (array $tag) {
-                    return empty($tag['id']) ? null : [
+                'tags' => array_filter(array_map(static function (array $tag) {
+                    return ($tag['id'] ?? '') === '' ? null : [
                         'id' => $tag['id'],
                         'name' => ElasticsearchIndexingUtils::stripText($tag['name'] ?? ''),
                         '_count' => 1,
@@ -299,13 +308,13 @@ class ElasticsearchProductDefinition extends AbstractElasticsearchDefinition
                     'name' => ElasticsearchFieldMapper::translated(field: 'deliveryTimeName', items: $translation),
                     '_count' => 1,
                 ],
-                'properties' => array_values(array_map(function (string $propertyId) use ($groups) {
+                'properties' => array_values(array_map(static function (string $propertyId) use ($groups) {
                     return array_merge([
                         'id' => $propertyId,
                         '_count' => 1,
                     ], $groups[$propertyId] ?? []);
                 }, ElasticsearchIndexingUtils::parseJson($item, 'propertyIds'))),
-                'options' => array_values(array_map(function (string $optionId) use ($groups) {
+                'options' => array_values(array_map(static function (string $optionId) use ($groups) {
                     return array_merge([
                         'id' => $optionId,
                         '_count' => 1,
@@ -319,6 +328,11 @@ class ElasticsearchProductDefinition extends AbstractElasticsearchDefinition
                 'states' => ElasticsearchIndexingUtils::parseJson($item, 'states'),
                 'customFields' => $customFields,
                 'name' => $names,
+                'parent' => $item['parentId'] !== null ? [
+                    'id' => $item['parentId'],
+                    '_count' => 1,
+                    'name' => $parentNames,
+                ] : null,
                 'description' => ElasticsearchFieldMapper::translated(field: 'description', items: $translation),
                 'metaTitle' => ElasticsearchFieldMapper::translated(field: 'metaTitle', items: $translation),
                 'metaDescription' => ElasticsearchFieldMapper::translated(field: 'metaDescription', items: $translation),
@@ -327,9 +341,9 @@ class ElasticsearchProductDefinition extends AbstractElasticsearchDefinition
                 ...$visibilitiesFlatten,
             ];
 
+            // @deprecated tag:v6.8.0 - `product.states` is removed in v6.8, so it is not indexed
             if (Feature::isActive('v6.8.0.0')) {
-                unset($documents[$id]['categoriesRo']);
-                unset($documents[$id]['visibilities']);
+                unset($documents[$id]['states']);
             }
         }
 
@@ -389,7 +403,7 @@ SELECT
     IFNULL(p.cheapest_price_accessor, pp.cheapest_price_accessor) as cheapest_price_accessor,
     LOWER(HEX(p.parent_id)) as parentId,
     p.child_count as childCount,
-    p.states
+    p.type#states#
 
 FROM product p
     LEFT JOIN product pp ON(p.parent_id = pp.id AND pp.version_id = :liveVersionId)
@@ -403,6 +417,9 @@ GROUP BY p.id
 SQL;
 
         $baseMapping = [
+            // @deprecated tag:v6.8.0 - the `product.states` column is removed in v6.8 (see Migration1763125892),
+            // so it can only be selected while the column still exists
+            '#states#' => Feature::isActive('v6.8.0.0') ? '' : ",\n    p.states",
             '#tags#' => SqlHelper::objectArray([
                 'name' => 'tag.name',
                 'id' => 'LOWER(HEX(tag.id))',
@@ -431,6 +448,7 @@ SQL;
 SELECT
     LOWER(HEX(p.id)) AS id,
     IFNULL(product_main.name, product_parent.name) AS name,
+    product_parent.name AS parentName,
     IFNULL(product_main.description, product_parent.description) AS description,
     IFNULL(product_main.meta_title, product_parent.meta_title) AS metaTitle,
     IFNULL(product_main.meta_description, product_parent.meta_description) AS metaDescription,
@@ -483,7 +501,8 @@ SQL;
                 $categories = $base[$id]['categories'] ?? [];
                 $translatedCategories = ElasticsearchIndexingUtils::parseJson($translation, 'categories');
 
-                if (!empty($translation['customSearchKeywords'])) {
+                $customSearchKeywords = $translation['customSearchKeywords'] ?? null;
+                if ($customSearchKeywords !== null && $customSearchKeywords !== '') {
                     $translation['customSearchKeywords'] = ElasticsearchIndexingUtils::parseJson($translation, 'customSearchKeywords');
                 }
 
@@ -504,7 +523,7 @@ SQL;
      */
     private function fetchProperties(array $propertyIds): array
     {
-        if (empty($propertyIds)) {
+        if ($propertyIds === []) {
             return [];
         }
 
@@ -570,7 +589,7 @@ SQL;
                 $key = 'cheapest_price_' . $rule . '_' . $currency . '_net';
                 $mapped[$key] = $taxes['net'];
 
-                if (empty($taxes['percentage'])) {
+                if (($taxes['percentage'] ?? []) === []) {
                     continue;
                 }
 

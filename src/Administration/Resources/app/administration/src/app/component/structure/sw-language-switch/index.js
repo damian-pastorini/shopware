@@ -30,7 +30,6 @@ export default {
         changeGlobalLanguage: {
             type: Boolean,
             required: false,
-            // eslint-disable-next-line vue/no-boolean-default
             default: true,
         },
         abortChangeFunction: {
@@ -46,13 +45,11 @@ export default {
         savePermission: {
             type: Boolean,
             required: false,
-            // eslint-disable-next-line vue/no-boolean-default
             default: true,
         },
         allowEdit: {
             type: Boolean,
             required: false,
-            // eslint-disable-next-line vue/no-boolean-default
             default: true,
         },
     },
@@ -74,6 +71,14 @@ export default {
             criteria.addFilter(Criteria.equals('active', true));
 
             return criteria;
+        },
+
+        languageCacheKey() {
+            return [
+                'shared-data',
+                'active-languages',
+                Shopware.Context.api.languageId ?? 'default',
+            ];
         },
     },
 

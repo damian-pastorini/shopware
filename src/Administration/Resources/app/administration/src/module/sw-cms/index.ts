@@ -2,16 +2,16 @@ import CmsPageTypeService from './service/cms-page-type.service';
 import defaultSearchConfiguration from './default-search-configuration';
 import initCmsPageTypes from './init/cmsPageTypes.init';
 import './service/cms.service';
-import './service/cmsDataResolver.service';
-import './service/cms-block-favorites.service';
-import './service/cms-element-favorites.service';
-import './store/cms-page.store';
+import './acl';
+import './blocks';
+import './component';
+import './elements';
 import './mixin/sw-cms-element.mixin';
 import './mixin/sw-cms-state.mixin';
-import './blocks';
-import './elements';
-import './component';
-import './acl';
+import './store/cms-page.store';
+import './service/cms-block-favorites.service';
+import './service/cms-element-favorites.service';
+import './service/cmsDataResolver.service';
 
 /**
  * @private
@@ -41,9 +41,9 @@ Shopware.Module.register('sw-cms', {
     name: 'cms',
     title: 'sw-cms.general.mainMenuItemGeneral',
     description: 'The module for creating content.',
-    color: '#ff68b4',
-    icon: 'regular-content',
-    favicon: 'icon-module-content.png',
+    color: 'var(--color-pink-500)',
+    icon: 'regular-image-text',
+    favicon: 'icon-module-content.svg',
     entity: 'cms_page',
 
     routes: {
@@ -79,16 +79,16 @@ Shopware.Module.register('sw-cms', {
         {
             id: 'sw-content',
             label: 'global.sw-admin-menu.navigation.mainMenuItemContent',
-            color: '#ff68b4',
-            icon: 'regular-content',
+            color: 'var(--color-pink-500)',
+            icon: 'regular-image-text',
             position: 50,
         },
         {
             id: 'sw-cms',
             label: 'sw-cms.general.mainMenuItemGeneral',
-            color: '#ff68b4',
+            color: 'var(--color-pink-500)',
             path: 'sw.cms.index',
-            icon: 'regular-content',
+            icon: 'regular-image-text',
             position: 10,
             parent: 'sw-content',
             privilege: 'cms.viewer',

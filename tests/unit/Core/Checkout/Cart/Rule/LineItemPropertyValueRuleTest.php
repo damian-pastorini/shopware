@@ -23,9 +23,9 @@ use Shopware\Core\System\SalesChannel\SalesChannelContext;
 /**
  * @internal
  */
+#[Package('fundamentals@after-sales')]
 #[CoversClass(LineItemPropertyValueRule::class)]
 #[Group('rules')]
-#[Package('checkout')]
 class LineItemPropertyValueRuleTest extends TestCase
 {
     private LineItemPropertyValueRule $rule;
@@ -65,7 +65,7 @@ class LineItemPropertyValueRuleTest extends TestCase
         $cart = new Cart(Uuid::randomHex());
         $cart->setLineItems($lineItems);
 
-        $context = $this->createMock(SalesChannelContext::class);
+        $context = static::createStub(SalesChannelContext::class);
         $scope = new CartRuleScope($cart, $context);
 
         $this->rule->assign(['identifiers' => $identifiers, 'operator' => $operator]);
@@ -86,7 +86,7 @@ class LineItemPropertyValueRuleTest extends TestCase
         $lineItem = new LineItem(Uuid::randomHex(), LineItem::PRODUCT_LINE_ITEM_TYPE, null, 1);
         $lineItem->setPayloadValue('propertyIds', $itemPropertyIds);
 
-        $context = $this->createMock(SalesChannelContext::class);
+        $context = static::createStub(SalesChannelContext::class);
         $scope = new LineItemScope($lineItem, $context);
 
         $this->rule->assign(['identifiers' => $identifiers, 'operator' => $operator]);
@@ -99,7 +99,7 @@ class LineItemPropertyValueRuleTest extends TestCase
 
     public function testInvalidScopeIsFalse(): void
     {
-        $invalidScope = new CheckoutRuleScope($this->createMock(SalesChannelContext::class));
+        $invalidScope = new CheckoutRuleScope(static::createStub(SalesChannelContext::class));
         $this->rule->assign(['identifiers' => [Uuid::randomHex()], 'operator' => Rule::OPERATOR_EQ]);
         static::assertFalse($this->rule->match($invalidScope));
     }
@@ -108,7 +108,7 @@ class LineItemPropertyValueRuleTest extends TestCase
     {
         $lineItem = new LineItem(Uuid::randomHex(), LineItem::PRODUCT_LINE_ITEM_TYPE, null, 1);
 
-        $context = $this->createMock(SalesChannelContext::class);
+        $context = static::createStub(SalesChannelContext::class);
         $scope = new LineItemScope($lineItem, $context);
 
         $this->rule->assign(['identifiers' => [Uuid::randomHex()], 'operator' => Rule::OPERATOR_EQ]);
@@ -132,18 +132,46 @@ class LineItemPropertyValueRuleTest extends TestCase
         ], $configData['operatorSet']);
     }
 
+    #[DataProvider('lineItemTypeProvider')]
+    public function testMatchesByLineItemType(string $type, bool $lineItemScope, bool $expected): void
+    {
+        $rule = new LineItemPropertyValueRule(Rule::OPERATOR_NEQ, [Uuid::randomHex()]);
+
+        $lineItem = new LineItem(Uuid::randomHex(), $type);
+        $context = static::createStub(SalesChannelContext::class);
+
+        if ($lineItemScope) {
+            $scope = new LineItemScope($lineItem, $context);
+        } else {
+            $cart = new Cart(Uuid::randomHex());
+            $cart->setLineItems(new LineItemCollection([$lineItem]));
+            $scope = new CartRuleScope($cart, $context);
+        }
+
+        static::assertSame($expected, $rule->match($scope));
+    }
+
     /**
-     * @return iterable<string, array{bool, list<string>, list<string>, string}>
+     * @return \Generator<string, array{non-empty-string, bool, bool}>
      */
-    public static function getMatchValues(): iterable
+    public static function lineItemTypeProvider(): \Generator
+    {
+        yield 'product via line item scope' => [LineItem::PRODUCT_LINE_ITEM_TYPE, true, true];
+        yield 'product via cart scope' => [LineItem::PRODUCT_LINE_ITEM_TYPE, false, true];
+        yield 'custom via line item scope' => [LineItem::CUSTOM_LINE_ITEM_TYPE, true, false];
+        yield 'custom via cart scope' => [LineItem::CUSTOM_LINE_ITEM_TYPE, false, false];
+    }
+
+    /**
+     * @return \Generator<string, array{bool, list<string>, list<string>, string}>
+     */
+    public static function getMatchValues(): \Generator
     {
         $id = Uuid::randomHex();
 
-        return [
-            yield 'should match when property id is included' => [true, [$id], [$id, Uuid::randomHex()], Rule::OPERATOR_EQ],
-            yield 'should not match when property id is not included' => [false, [$id], [Uuid::randomHex()], Rule::OPERATOR_EQ],
-            yield 'should match when property id is not included' => [true, [$id, Uuid::randomHex()], [Uuid::randomHex()], Rule::OPERATOR_NEQ],
-            yield 'should not match when property id is included' => [false, [$id, Uuid::randomHex()], [$id], Rule::OPERATOR_NEQ],
-        ];
+        yield 'should match when property id is included' => [true, [$id], [$id, Uuid::randomHex()], Rule::OPERATOR_EQ];
+        yield 'should not match when property id is not included' => [false, [$id], [Uuid::randomHex()], Rule::OPERATOR_EQ];
+        yield 'should match when property id is not included' => [true, [$id, Uuid::randomHex()], [Uuid::randomHex()], Rule::OPERATOR_NEQ];
+        yield 'should not match when property id is included' => [false, [$id, Uuid::randomHex()], [$id], Rule::OPERATOR_NEQ];
     }
 }

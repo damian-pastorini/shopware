@@ -4,6 +4,7 @@ namespace Shopware\Tests\Integration\Core\Framework\Api\Controller;
 
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Plugin;
 use Shopware\Core\Framework\Plugin\KernelPluginCollection;
 use Shopware\Core\Framework\Test\TestCaseBase\AdminFunctionalTestBehaviour;
@@ -11,6 +12,7 @@ use Shopware\Core\Framework\Test\TestCaseBase\AdminFunctionalTestBehaviour;
 /**
  * @internal
  */
+#[Package('framework')]
 class CustomSnippetFormatControllerTest extends TestCase
 {
     use AdminFunctionalTestBehaviour;
@@ -83,7 +85,7 @@ class CustomSnippetFormatControllerTest extends TestCase
             'custom-snippet/custom-snippet',
         ], $content['data']);
 
-        $originalCollection = $pluginCollection->filter(fn (Plugin $plugin) => $plugin->getName() !== 'BundleWithCustomSnippet');
+        $originalCollection = $pluginCollection->filter(static fn (Plugin $plugin) => $plugin->getName() !== 'BundleWithCustomSnippet');
 
         $pluginsProp = new \ReflectionProperty($pluginCollection, 'plugins');
         $pluginsProp->setValue($pluginCollection, $originalCollection->all());

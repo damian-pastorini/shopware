@@ -5,6 +5,7 @@ namespace Shopware\Core\Framework\Script\Api;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Framework\Adapter\Cache\CacheCompressor;
 use Shopware\Core\Framework\Adapter\Cache\Http\HttpCacheKeyGenerator;
+use Shopware\Core\Framework\Adapter\Request\RequestParamHelper;
 use Shopware\Core\Framework\Feature;
 use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Routing\StoreApiRouteScope;
@@ -20,8 +21,8 @@ use Symfony\Component\Routing\Attribute\Route;
 /**
  * @internal
  */
-#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [StoreApiRouteScope::ID]])]
 #[Package('framework')]
+#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [StoreApiRouteScope::ID]])]
 class ScriptStoreApiRoute
 {
     public function __construct(
@@ -62,8 +63,8 @@ class ScriptStoreApiRoute
         $this->executor->execute($responseHook);
 
         $fields = new ResponseFields(
-            $request->get('includes', []),
-            $request->get('excludes', []),
+            RequestParamHelper::get($request, 'includes', []),
+            RequestParamHelper::get($request, 'excludes', []),
         );
 
         $symfonyResponse = $this->scriptResponseEncoder->encodeToSymfonyResponse(
@@ -133,7 +134,7 @@ class ScriptStoreApiRoute
         }
 
         $item->tag($cacheConfig->getCacheTags());
-        $item->expiresAfter($cacheConfig->getMaxAge());
+        $item->expiresAfter($cacheConfig->getSharedMaxAge());
 
         $this->cache->save($item);
     }

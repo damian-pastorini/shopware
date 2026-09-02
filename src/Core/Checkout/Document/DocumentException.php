@@ -11,6 +11,9 @@ use Shopware\Core\Framework\HttpException;
 use Shopware\Core\Framework\Log\Package;
 use Symfony\Component\HttpFoundation\Response;
 
+/**
+ * @codeCoverageIgnore
+ */
 #[Package('after-sales')]
 class DocumentException extends HttpException
 {
@@ -35,6 +38,18 @@ class DocumentException extends HttpException
     public const CANNOT_CREATE_ZIP_FILE = 'DOCUMENT__CANNOT_CREATE_ZIP_FILE';
 
     public const DOCUMENT_ZIP_READ_ERROR = 'DOCUMENT__ZIP_READ_ERROR';
+
+    public const DOCUMENT_FILE_TYPE_UNAVAILABLE = 'DOCUMENT__FILE_TYPE_UNAVAILABLE';
+
+    public const DOCUMENT_ACCEPT_HEADER_MIME_TYPES_NOT_SUPPORTED = 'DOCUMENT__ACCEPT_HEADER_MIME_TYPES_NOT_SUPPORTED';
+
+    public const DOCUMENT_FILE_TYPE_NOT_SUPPORTED = 'DOCUMENT__FILE_TYPE_NOT_SUPPORTED';
+
+    public const DOCUMENT_HAS_DEPENDING_DOCUMENTS = 'DOCUMENT__HAS_DEPENDING_DOCUMENTS';
+
+    public const DOCUMENT_BASE_INVOICE_NOT_FOUND = 'DOCUMENT__BASE_INVOICE_NOT_FOUND';
+
+    public const DOCUMENT_AUTH_THROTTLED = 'DOCUMENT__AUTH_THROTTLED';
 
     public static function invalidDocumentGeneratorType(string $type): self
     {
@@ -140,6 +155,16 @@ class DocumentException extends HttpException
         );
     }
 
+    public static function documentAuthThrottledException(int $waitTime): self
+    {
+        return new self(
+            Response::HTTP_TOO_MANY_REQUESTS,
+            self::DOCUMENT_AUTH_THROTTLED,
+            'Document auth throttled for {{ seconds }} seconds.',
+            ['seconds' => $waitTime],
+        );
+    }
+
     /**
      * @deprecated tag:v6.8.0 - not used anymore, use CustomerException::guestNotAuthenticated() instead
      */
@@ -204,6 +229,79 @@ class DocumentException extends HttpException
             'Cannot read document ZIP file: {{ filePath }}',
             ['filePath' => $filePath],
             $previous
+        );
+    }
+
+    /**
+     * @param array<string> $fileExtensions
+     */
+    public static function documentFileTypeUnavailable(string $documentId, array $fileExtensions): self
+    {
+        return new self(
+            Response::HTTP_NOT_FOUND,
+            self::DOCUMENT_FILE_TYPE_UNAVAILABLE,
+            'Document with id {{ documentId }} has no generated document with file extension {{ fileExtensions }}.',
+            [
+                'documentId' => $documentId,
+                'fileExtensions' => implode(',', $fileExtensions),
+            ]
+        );
+    }
+
+    /**
+     * @param array<string> $requestedMimeTypes
+     * @param array<string> $supportedMimeTypes
+     */
+    public static function documentAcceptHeaderMimeTypesNotSupported(array $requestedMimeTypes, array $supportedMimeTypes): self
+    {
+        return new self(
+            Response::HTTP_NOT_ACCEPTABLE,
+            self::DOCUMENT_ACCEPT_HEADER_MIME_TYPES_NOT_SUPPORTED,
+            'The requested mime types are not supported: {{ requestedMimeTypes }}. Supported mime types are: {{ supportedMimeTypes }}.',
+            [
+                'requestedMimeTypes' => implode(',', $requestedMimeTypes),
+                'supportedMimeTypes' => implode(',', $supportedMimeTypes),
+            ]
+        );
+    }
+
+    public static function documentFileTypeNotSupported(string $fileType): self
+    {
+        return new self(
+            Response::HTTP_NOT_ACCEPTABLE,
+            self::DOCUMENT_FILE_TYPE_NOT_SUPPORTED,
+            'The requested file type is not supported: {{ requestedFileType }}.',
+            [
+                'requestedFileType' => $fileType,
+            ]
+        );
+    }
+
+    /**
+     * @param array<string> $dependingDocuments
+     */
+    public static function documentHasDependentDocuments(array $dependingDocuments): self
+    {
+        return new self(
+            Response::HTTP_UNPROCESSABLE_ENTITY,
+            self::DOCUMENT_HAS_DEPENDING_DOCUMENTS,
+            'The document cannot be deleted because other documents depend on it: {{ dependingDocuments }}.',
+            [
+                'dependingDocuments' => implode(', ', $dependingDocuments),
+            ]
+        );
+    }
+
+    public static function referencedInvoiceNotFound(string $documentType, string $orderId): self
+    {
+        return new self(
+            Response::HTTP_NOT_FOUND,
+            self::DOCUMENT_BASE_INVOICE_NOT_FOUND,
+            'Could not generate document of type "{{ documentType }}" for order "{{ orderId }}" because the referenced invoice could not be found.',
+            [
+                'documentType' => $documentType,
+                'orderId' => $orderId,
+            ]
         );
     }
 }

@@ -4,7 +4,7 @@ namespace Shopware\Tests\Unit\Core\System\SalesChannel;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
-use Shopware\Core\Checkout\Cart\AbstractCartPersister;
+use Shopware\Core\Checkout\CheckoutPermissions;
 use Shopware\Core\Content\MeasurementSystem\MeasurementUnits;
 use Shopware\Core\Framework\DataAbstractionLayer\FieldVisibility;
 use Shopware\Core\Framework\Log\Package;
@@ -16,7 +16,7 @@ use Shopware\Core\Test\Generator;
 /**
  * @internal
  */
-#[Package('discovery')]
+#[Package('framework')]
 #[CoversClass(SalesChannelContext::class)]
 class SalesChannelContextTest extends TestCase
 {
@@ -79,35 +79,60 @@ class SalesChannelContextTest extends TestCase
         ], $salesChannelContext->getMeasurementSystem()->jsonSerialize());
     }
 
+    public function testGetRuleIdsByAreasDeduplicatesWithinAndAcrossAreas(): void
+    {
+        $salesChannelContext = Generator::generateSalesChannelContext();
+
+        $idA = Uuid::randomHex();
+        $idB = Uuid::randomHex();
+        $idC = Uuid::randomHex();
+
+        $salesChannelContext->setAreaRuleIds([
+            // duplicate id within a single area must be collapsed
+            'a' => [$idA, $idB, $idA],
+            'b' => [$idB, $idC],
+        ]);
+
+        // within-area dedup, insertion order preserved
+        static::assertSame([$idA, $idB], $salesChannelContext->getRuleIdsByAreas(['a']));
+        // cross-area dedup ($idB appears in both areas), first-occurrence order preserved
+        static::assertSame([$idA, $idB, $idC], $salesChannelContext->getRuleIdsByAreas(['a', 'b']));
+        // the result is a sequentially indexed list (no gaps from dedup)
+        static::assertSame([0, 1, 2], array_keys($salesChannelContext->getRuleIdsByAreas(['a', 'b'])));
+    }
+
     public function testWithPermissions(): void
     {
         $salesChannelContext = Generator::generateSalesChannelContext();
-        static::assertEmpty($salesChannelContext->getPermissions());
+        $permissionsBefore = $salesChannelContext->getPermissions();
+        static::assertSame([], $permissionsBefore);
 
         $called = false;
         $salesChannelContext->withPermissions(
-            [AbstractCartPersister::PERSIST_CART_ERROR_PERMISSION => true],
-            function (SalesChannelContext $context) use (&$called): void {
+            [CheckoutPermissions::PERSIST_CART_ERRORS => true],
+            static function (SalesChannelContext $context) use (&$called): void {
                 $called = true;
 
-                static::assertTrue($context->hasPermission(AbstractCartPersister::PERSIST_CART_ERROR_PERMISSION));
+                static::assertTrue($context->hasPermission(CheckoutPermissions::PERSIST_CART_ERRORS));
             },
         );
 
         static::assertTrue($called);
-        static::assertEmpty($salesChannelContext->getPermissions());
+        $permissionsAfter = $salesChannelContext->getPermissions();
+        static::assertSame([], $permissionsAfter);
     }
 
     public function testWithPermissionsWithLockedPermissions(): void
     {
         $salesChannelContext = Generator::generateSalesChannelContext();
         $salesChannelContext->lockPermissions();
-        static::assertEmpty($salesChannelContext->getPermissions());
+        $permissionsBefore = $salesChannelContext->getPermissions();
+        static::assertSame([], $permissionsBefore);
 
         $called = false;
         $salesChannelContext->withPermissions(
-            [AbstractCartPersister::PERSIST_CART_ERROR_PERMISSION => true],
-            function (SalesChannelContext $context) use (&$called): void {
+            [CheckoutPermissions::PERSIST_CART_ERRORS => true],
+            static function (SalesChannelContext $context) use (&$called): void {
                 $called = true;
 
                 static::assertEmpty($context->getPermissions());
@@ -115,7 +140,8 @@ class SalesChannelContextTest extends TestCase
         );
 
         static::assertTrue($called);
-        static::assertEmpty($salesChannelContext->getPermissions());
+        $permissionsAfter = $salesChannelContext->getPermissions();
+        static::assertSame([], $permissionsAfter);
     }
 
     public function testSalesChannelContextStateFunctionPassesResetsAndKeepsState(): void
@@ -152,7 +178,7 @@ class SalesChannelContextTest extends TestCase
         // fake twig rendering context, see `\Shopware\Core\Framework\Adapter\Twig\SwTwigFunction::getAttribute()`
         FieldVisibility::$isInTwigRenderingContext = true;
 
-        static::expectExceptionObject(SalesChannelException::contextTokenNotAccessible());
+        $this->expectExceptionObject(SalesChannelException::contextTokenNotAccessible());
         $salesChannelContext->getToken();
     }
 }

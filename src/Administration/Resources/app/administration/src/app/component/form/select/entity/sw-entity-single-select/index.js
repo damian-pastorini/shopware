@@ -34,14 +34,13 @@ export default {
     ],
 
     props: {
-        // eslint-disable-next-line vue/require-prop-types
+        // null is a common value here, e.g. passed by the inheritance system.
         value: {
-            required: true,
+            required: false,
         },
         highlightSearchTerm: {
             type: Boolean,
             required: false,
-            // eslint-disable-next-line vue/no-boolean-default
             default: true,
         },
         placeholder: {
@@ -80,7 +79,7 @@ export default {
             type: Object,
             required: false,
             default(props) {
-                return new Criteria(1, props.resultLimit);
+                return new Criteria(1, props.resultLimit).setTotalCountMode(0);
             },
         },
         context: {
@@ -159,7 +158,6 @@ export default {
         disabled: {
             type: Boolean,
             required: false,
-            // eslint-disable-next-line vue/no-boolean-default
             default: undefined,
         },
         label: {
@@ -176,6 +174,21 @@ export default {
             type: Array,
             required: false,
             default: () => [],
+        },
+        autocomplete: {
+            type: String,
+            required: false,
+            default: undefined,
+        },
+        cacheKey: {
+            type: Array,
+            required: false,
+            default: () => [],
+        },
+        cacheTtl: {
+            type: Number,
+            required: false,
+            default: undefined,
         },
     },
 
@@ -274,17 +287,27 @@ export default {
             }
 
             this.isLoading = true;
-            return this.repository.get(this.value, { ...this.context, inheritance: true }, this.criteria).then((item) => {
-                if (!item) {
-                    this.$emit('update:value', null);
-                }
+            return this.repository
+                .get(
+                    this.value,
+                    { ...this.context, inheritance: true },
+                    this.criteria,
+                    this.getCacheOptions([
+                        'selected',
+                        this.value,
+                    ]),
+                )
+                .then((item) => {
+                    if (!item) {
+                        this.$emit('update:value', null);
+                    }
 
-                this.criteria.setIds([]);
+                    this.criteria.setIds([]);
 
-                this.singleSelection = item;
-                this.isLoading = false;
-                return item;
-            });
+                    this.singleSelection = item;
+                    this.isLoading = false;
+                    return item;
+                });
         },
 
         createCollection(collection) {
@@ -326,7 +349,7 @@ export default {
                             this.resultCollection = result;
 
                             const newEntity = this.repository.create(this.context, -1);
-                            newEntity.name = this.$tc(
+                            newEntity.name = this.$t(
                                 'global.sw-single-select.labelEntityAdd',
                                 {
                                     term: this.searchTerm,
@@ -375,13 +398,36 @@ export default {
         loadData() {
             this.isLoading = true;
 
-            return this.repository.search(this.criteria, { ...this.context, inheritance: true }).then((result) => {
-                this.displaySearch(result);
+            return this.repository
+                .search(
+                    this.criteria,
+                    { ...this.context, inheritance: true },
+                    this.getCacheOptions([
+                        'search',
+                        this.criteria.parse(),
+                    ]),
+                )
+                .then((result) => {
+                    this.displaySearch(result);
 
-                this.isLoading = false;
+                    this.isLoading = false;
 
-                return result;
-            });
+                    return result;
+                });
+        },
+
+        getCacheOptions(key) {
+            if (this.cacheKey.length === 0) {
+                return undefined;
+            }
+
+            return {
+                cacheKey: [
+                    ...this.cacheKey,
+                    ...key,
+                ],
+                ttl: this.cacheTtl,
+            };
         },
 
         checkEntityExists(term) {
@@ -409,7 +455,7 @@ export default {
 
         displaySearch(result) {
             if (!this.resultCollection) {
-                this.resultCollection = result;
+                this.resultCollection = EntityCollection.fromCollection(result);
             } else {
                 result.forEach((item) => {
                     // Prevent duplicate entries
@@ -593,7 +639,7 @@ export default {
 
                     this.$emit('option-select', Utils.string.camelCase(this.entity), entity);
                     this.createNotificationSuccess({
-                        message: this.$tc(
+                        message: this.$t(
                             'global.sw-single-select.labelEntityAddedSuccess',
                             {
                                 term: entity.name,
@@ -605,7 +651,7 @@ export default {
                 })
                 .catch(() => {
                     this.createNotificationError({
-                        message: this.$tc(
+                        message: this.$t(
                             'global.notification.notificationSaveErrorMessage',
                             {
                                 entityName: this.entity,

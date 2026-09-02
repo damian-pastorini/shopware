@@ -4,7 +4,7 @@
 import template from './sw-cms-list.html.twig';
 import './sw-cms-list.scss';
 
-const { Mixin } = Shopware;
+const { Mixin, Context } = Shopware;
 const { Criteria } = Shopware.Data;
 
 // eslint-disable-next-line sw-deprecation-rules/private-feature-declarations
@@ -84,7 +84,7 @@ export default {
         sortPageTypes() {
             const sortByAllPagesOption = {
                 value: '',
-                name: this.$tc('sw-cms.sorting.labelSortByAllPages'),
+                name: this.$t('sw-cms.sorting.labelSortByAllPages'),
                 active: true,
             };
 
@@ -92,13 +92,35 @@ export default {
                 (accumulator, pageType) => {
                     accumulator.push({
                         value: pageType.name,
-                        name: this.$tc(pageType.title),
+                        name: this.$t(pageType.title),
                     });
 
                     return accumulator;
                 },
                 [sortByAllPagesOption],
             );
+        },
+
+        activePageTypeTab() {
+            return this.currentPageType || 'all-pages';
+        },
+
+        cmsListPageTypeTabs() {
+            return this.sortPageTypes.map((pageType) => {
+                const tab = {
+                    label: pageType.name,
+                    name: pageType.value || 'all-pages',
+                    onClick: () => {
+                        this.onSortPageType(pageType.value);
+                    },
+                };
+
+                if (pageType.disabled) {
+                    tab.disabled = pageType.disabled;
+                }
+
+                return tab;
+            });
         },
 
         listCriteria() {
@@ -160,6 +182,14 @@ export default {
         dateFilter() {
             return Shopware.Filter.getByName('date');
         },
+
+        adminEsEnable() {
+            if (!Shopware.Feature.isActive('ENABLE_OPENSEARCH_FOR_ADMIN_API')) {
+                return false;
+            }
+
+            return Context.app.adminEsEnable ?? false;
+        },
     },
 
     created() {
@@ -167,11 +197,9 @@ export default {
     },
 
     methods: {
-        createdComponent() {
-            Shopware.Store.get('adminMenu').collapseSidebar();
-
+        async createdComponent() {
             if (this.acl.can('user_config:read')) {
-                this.loadGridUserSettings();
+                await this.loadGridUserSettings().catch(() => {});
             }
 
             if (this.acl.can('system_config:read')) {
@@ -222,7 +250,13 @@ export default {
         async getList() {
             this.isLoading = true;
 
-            const criteria = await this.addQueryScores(this.term, this.listCriteria);
+            let criteria;
+            if (this.adminEsEnable) {
+                criteria = this.listCriteria;
+                criteria.setTerm(this.term);
+            } else {
+                criteria = await this.addQueryScores(this.term, this.listCriteria);
+            }
             if (!this.entitySearchable) {
                 this.isLoading = false;
                 this.total = 0;
@@ -336,14 +370,21 @@ export default {
             criteria.addAssociation('folder');
             criteria.addFilter(Criteria.equals('entity', 'cms_page'));
 
-            return this.defaultFolderRepository.search(criteria).then((searchResult) => {
-                const defaultFolder = searchResult.first();
-                if (defaultFolder.folder?.id) {
-                    return defaultFolder.folder.id;
-                }
+            return this.defaultFolderRepository
+                .search(criteria, {
+                    cacheKey: [
+                        'media-default-folder',
+                        'cms_page',
+                    ],
+                })
+                .then((searchResult) => {
+                    const defaultFolder = searchResult.first();
+                    if (defaultFolder.folder?.id) {
+                        return defaultFolder.folder.id;
+                    }
 
-                return null;
-            });
+                    return null;
+                });
         },
 
         onChangeLanguage(languageId) {
@@ -464,7 +505,7 @@ export default {
             }
 
             if (!behavior.overwrites.name) {
-                behavior.overwrites.name = `${page.name} - ${this.$tc('global.default.copy')}`;
+                behavior.overwrites.name = `${page.name} - ${this.$t('global.default.copy')}`;
             }
 
             this.isLoading = true;
@@ -477,7 +518,7 @@ export default {
                 .catch(() => {
                     this.isLoading = false;
                     this.createNotificationError({
-                        message: this.$tc('global.notification.unspecifiedSaveErrorMessage'),
+                        message: this.$t('global.notification.unspecifiedSaveErrorMessage'),
                     });
                 });
         },
@@ -507,7 +548,7 @@ export default {
         },
 
         deleteCmsPage(page) {
-            const messageDeleteError = this.$tc('sw-cms.components.cmsListItem.notificationDeleteErrorMessage');
+            const messageDeleteError = this.$t('sw-cms.components.cmsListItem.notificationDeleteErrorMessage');
 
             this.isLoading = true;
             return this.pageRepository
@@ -527,35 +568,35 @@ export default {
             return [
                 {
                     property: 'name',
-                    label: this.$tc('sw-cms.list.gridHeaderName'),
+                    label: this.$t('sw-cms.list.gridHeaderName'),
                     inlineEdit: 'string',
                     primary: true,
                     sortable: false,
                 },
                 {
                     property: 'type',
-                    label: this.$tc('sw-cms.list.gridHeaderType'),
+                    label: this.$t('sw-cms.list.gridHeaderType'),
                     sortable: false,
                 },
                 {
                     property: 'assignments',
-                    label: this.$tc('sw-cms.list.gridHeaderAssignments'),
+                    label: this.$t('sw-cms.list.gridHeaderAssignments'),
                     sortable: false,
                 },
                 {
                     property: 'assignedPages',
-                    label: this.$tc('sw-cms.list.gridHeaderAssignedPages'),
+                    label: this.$t('sw-cms.list.gridHeaderAssignedPages'),
                     sortable: false,
                     visible: false,
                 },
                 {
                     property: 'createdAt',
-                    label: this.$tc('sw-cms.list.gridHeaderCreated'),
+                    label: this.$t('sw-cms.list.gridHeaderCreated'),
                     sortable: false,
                 },
                 {
                     property: 'updatedAt',
-                    label: this.$tc('sw-cms.list.gridHeaderUpdated'),
+                    label: this.$t('sw-cms.list.gridHeaderUpdated'),
                     sortable: false,
                     visible: false,
                 },
@@ -578,7 +619,7 @@ export default {
 
             return {
                 showDelay: 300,
-                message: this.$tc(snippetKey),
+                message: this.$t(snippetKey),
                 disabled: !this.layoutIsLinked(page.id),
             };
         },
@@ -588,8 +629,8 @@ export default {
                 this.defaultProductId,
                 this.defaultCategoryId,
             ].includes(page.id);
-            const defaultText = this.$tc('sw-cms.components.cmsListItem.defaultLayout');
-            const typeLabel = this.$tc(this.cmsPageTypeService.getType(page.type)?.title);
+            const defaultText = this.$t('sw-cms.components.cmsListItem.defaultLayout');
+            const typeLabel = this.$t(this.cmsPageTypeService.getType(page.type)?.title);
 
             return isDefault ? `${defaultText} - ${typeLabel}` : typeLabel;
         },

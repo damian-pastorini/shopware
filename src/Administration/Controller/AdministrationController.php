@@ -12,6 +12,8 @@ use Shopware\Administration\Framework\Routing\KnownIps\KnownIpsCollectorInterfac
 use Shopware\Administration\Snippet\SnippetFinderInterface;
 use Shopware\Core\Checkout\Customer\CustomerCollection;
 use Shopware\Core\Checkout\Customer\CustomerEntity;
+use Shopware\Core\Checkout\Customer\Validation\CustomerEmailUniqueCheck;
+use Shopware\Core\Checkout\Customer\Validation\CustomerEmailUniqueChecker;
 use Shopware\Core\Defaults;
 use Shopware\Core\Framework\Adapter\Twig\TemplateFinderInterface;
 use Shopware\Core\Framework\Api\OAuth\SymfonyBearerTokenValidator;
@@ -20,9 +22,6 @@ use Shopware\Core\Framework\DataAbstractionLayer\DefinitionInstanceRegistry;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\DataAbstractionLayer\Field\Flag\AllowHtml;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
-use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\EqualsFilter;
-use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\MultiFilter;
-use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\NotEqualsFilter;
 use Shopware\Core\Framework\Feature;
 use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Routing\RoutingException;
@@ -34,7 +33,6 @@ use Shopware\Core\PlatformRequest;
 use Shopware\Core\System\Currency\CurrencyCollection;
 use Shopware\Core\System\Language\LanguageCollection;
 use Shopware\Core\System\Language\LanguageEntity;
-use Shopware\Core\System\SystemConfig\SystemConfigService;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -45,10 +43,21 @@ use Symfony\Component\Validator\ConstraintViolation;
 use Symfony\Component\Validator\ConstraintViolationList;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
-#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [AdministrationRouteScope::ID]])]
 #[Package('framework')]
+#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [AdministrationRouteScope::ID]])]
 class AdministrationController extends AbstractController
 {
+    /**
+     * @deprecated tag:v6.8.0 - Will be removed together with the CacheControlListener and its BeforeCacheControlEvent.
+     * This marker will be not read, as the listener that used it to detect administration will be removed.
+     */
+    public const CACHE_ID_HEADER = 'X-Shopware-Cache-Id';
+
+    /**
+     * @deprecated tag:v6.8.0 - Will be removed together with the CacheControlListener and its BeforeCacheControlEvent.
+     */
+    public const CACHE_ID_ADMINISTRATION = 'administration';
+
     private const UNAUTHENTICATED_SNIPPET_NAMESPACES = [
         'sw-login',
         'global',
@@ -82,11 +91,12 @@ class AdministrationController extends AbstractController
         private readonly HtmlSanitizer $htmlSanitizer,
         private readonly DefinitionInstanceRegistry $definitionInstanceRegistry,
         ParameterBagInterface $params,
-        private readonly SystemConfigService $systemConfigService,
         private readonly FilesystemOperator $fileSystem,
         private readonly string $serviceRegistryUrl,
         private readonly EntityRepository $languageRepository,
         private readonly SymfonyBearerTokenValidator $tokenValidator,
+        private readonly string $analyticsGatewayUrl,
+        private readonly CustomerEmailUniqueChecker $customerEmailUniqueChecker,
         private readonly string $refreshTokenTtl = 'P1W',
     ) {
         // param is only available if the elasticsearch bundle is enabled
@@ -101,7 +111,12 @@ class AdministrationController extends AbstractController
             : true;
     }
 
-    #[Route(path: '/%shopware_administration.path_name%', name: 'administration.index', defaults: ['auth_required' => false], methods: ['GET'])]
+    #[Route(
+        path: '/%shopware_administration.path_name%',
+        name: 'administration.index',
+        defaults: ['auth_required' => false],
+        methods: [Request::METHOD_GET]
+    )]
     public function index(Request $request, Context $context): Response
     {
         $template = $this->finder->find('@Administration/administration/index.html.twig');
@@ -111,7 +126,7 @@ class AdministrationController extends AbstractController
         $refreshTokenInterval = new \DateInterval($this->refreshTokenTtl);
         $refreshTokenTtl = $refreshTokenInterval->s + $refreshTokenInterval->i * 60 + $refreshTokenInterval->h * 3600 + $refreshTokenInterval->d * 86400;
 
-        return $this->render($template, [
+        $response = $this->render($template, [
             'features' => Feature::getAll(),
             'systemLanguageId' => Defaults::LANGUAGE_SYSTEM,
             'defaultLanguageIds' => [Defaults::LANGUAGE_SYSTEM],
@@ -126,10 +141,30 @@ class AdministrationController extends AbstractController
             'refreshTokenTtl' => $refreshTokenTtl * 1000,
             'serviceRegistryUrl' => $this->serviceRegistryUrl,
             'productStreamIndexingEnabled' => $this->productStreamIndexingEnabled,
+            'analyticsGatewayUrl' => $this->analyticsGatewayUrl,
         ]);
+
+        $response->setPublic();
+        $response->setMaxAge(0);
+        $response->setSharedMaxAge(0);
+
+        if (!$this->firstRunWizardService->frwShouldRun()) {
+            $response->headers->addCacheControlDirective('stale-while-revalidate', '86400');
+        }
+
+        if (!Feature::isActive('v6.8.0.0')) {
+            $response->headers->set(self::CACHE_ID_HEADER, self::CACHE_ID_ADMINISTRATION);
+        }
+
+        return $response;
     }
 
-    #[Route(path: '/api/_admin/snippets', name: 'api.admin.snippets', defaults: ['auth_required' => false], methods: ['GET'])]
+    #[Route(
+        path: '/api/_admin/snippets',
+        name: 'api.admin.snippets',
+        defaults: ['auth_required' => false],
+        methods: [Request::METHOD_GET]
+    )]
     public function snippets(Request $request): Response
     {
         $snippets = [];
@@ -146,14 +181,18 @@ class AdministrationController extends AbstractController
         return new JsonResponse($snippets);
     }
 
-    #[Route(path: '/api/_admin/locales', name: 'api.admin.locales', defaults: ['auth_required' => false], methods: ['GET'])]
+    #[Route(
+        path: '/api/_admin/locales',
+        name: 'api.admin.locales',
+        defaults: ['auth_required' => false],
+        methods: [Request::METHOD_GET]
+    )]
     public function getLocales(Request $request, Context $context): Response
     {
         $criteria = (new Criteria())->addAssociation('locale');
 
         $languages = $this->languageRepository->search($criteria, $context);
-        /** @var array<string, string> $installedLocales */
-        $installedLocales = $languages->reduce(static function (array $accumulator, LanguageEntity $language) {
+        $installedLocales = $languages->getEntities()->reduce(static function (array $accumulator, LanguageEntity $language) {
             $locale = $language->getLocale();
             if ($locale !== null) {
                 $accumulator[$language->getId()] = $locale->getCode();
@@ -165,7 +204,11 @@ class AdministrationController extends AbstractController
         return new JsonResponse($installedLocales);
     }
 
-    #[Route(path: '/api/_admin/known-ips', name: 'api.admin.known-ips', methods: ['GET'])]
+    #[Route(
+        path: '/api/_admin/known-ips',
+        name: 'api.admin.known-ips',
+        methods: [Request::METHOD_GET]
+    )]
     public function knownIps(Request $request): Response
     {
         $ips = [];
@@ -180,7 +223,12 @@ class AdministrationController extends AbstractController
         return new JsonResponse(['ips' => $ips]);
     }
 
-    #[Route(path: '/%shopware_administration.path_name%/{pluginName}/index.html', name: 'administration.plugin.index', defaults: ['auth_required' => false], methods: ['GET'])]
+    #[Route(
+        path: '/%shopware_administration.path_name%/{pluginName}/index.html',
+        name: 'administration.plugin.index',
+        defaults: ['auth_required' => false],
+        methods: [Request::METHOD_GET]
+    )]
     public function pluginIndex(string $pluginName): Response
     {
         try {
@@ -197,12 +245,24 @@ class AdministrationController extends AbstractController
             'Content-Security-Policy' => 'script-src * \'unsafe-eval\' \'unsafe-inline\'',
             PlatformRequest::HEADER_FRAME_OPTIONS => 'sameorigin',
         ]);
-        $response->setSharedMaxAge(3600);
+        $response->setPublic();
+        $response->setMaxAge(0);
+        $response->setSharedMaxAge(0);
+        $response->headers->addCacheControlDirective('stale-while-revalidate', '86400');
+
+        if (!Feature::isActive('v6.8.0.0')) {
+            $response->headers->set(self::CACHE_ID_HEADER, self::CACHE_ID_ADMINISTRATION);
+        }
 
         return $response;
     }
 
-    #[Route(path: '/api/_admin/reset-excluded-search-term', name: 'api.admin.reset-excluded-search-term', defaults: ['_acl' => ['system_config:update', 'system_config:create', 'system_config:delete']], methods: ['POST'])]
+    #[Route(
+        path: '/api/_admin/reset-excluded-search-term',
+        name: 'api.admin.reset-excluded-search-term',
+        defaults: [PlatformRequest::ATTRIBUTE_ACL => ['system_config:update', 'system_config:create', 'system_config:delete']],
+        methods: [Request::METHOD_POST]
+    )]
     public function resetExcludedSearchTerm(Context $context): JsonResponse
     {
         $searchConfigId = $this->connection->fetchOne('SELECT id FROM product_search_config WHERE language_id = :language_id', ['language_id' => Uuid::fromHexToBytes($context->getLanguageId())]);
@@ -241,7 +301,11 @@ class AdministrationController extends AbstractController
         ]);
     }
 
-    #[Route(path: '/api/_admin/check-customer-email-valid', name: 'api.admin.check-customer-email-valid', methods: ['POST'])]
+    #[Route(
+        path: '/api/_admin/check-customer-email-valid',
+        name: 'api.admin.check-customer-email-valid',
+        methods: [Request::METHOD_POST]
+    )]
     public function checkCustomerEmailValid(Request $request, Context $context): JsonResponse
     {
         $params = [];
@@ -250,16 +314,18 @@ class AdministrationController extends AbstractController
         }
 
         $email = (string) $request->request->get('email');
-        $isCustomerBoundSalesChannel = $this->systemConfigService->get('core.systemWideLoginRegistration.isCustomerBoundToSalesChannel');
-        $boundSalesChannelId = null;
-        if ($isCustomerBoundSalesChannel) {
-            $boundSalesChannelId = $request->request->get('boundSalesChannelId');
-            if ($boundSalesChannelId !== null && !\is_string($boundSalesChannelId)) {
-                throw RoutingException::invalidRequestParameter('boundSalesChannelId');
-            }
+        $boundSalesChannelId = $request->request->get('boundSalesChannelId');
+        if ($boundSalesChannelId !== null && !\is_string($boundSalesChannelId)) {
+            throw RoutingException::invalidRequestParameter('boundSalesChannelId');
         }
 
-        $customer = $this->getCustomerByEmail((string) $request->request->get('id'), $email, $context, $boundSalesChannelId);
+        $customerId = $request->request->get('id');
+        $conflictingCustomerId = $this->customerEmailUniqueChecker->findConflictingCustomerId(new CustomerEmailUniqueCheck(
+            email: $email,
+            customerId: $customerId !== null ? (string) $customerId : null,
+            boundSalesChannelId: $boundSalesChannelId,
+        ));
+        $customer = $conflictingCustomerId !== null ? $this->getCustomerById($conflictingCustomerId, $context) : null;
         if ($customer === null) {
             return new JsonResponse(
                 ['isValid' => true]
@@ -289,7 +355,11 @@ class AdministrationController extends AbstractController
         throw new ConstraintViolationException($violations, $request->request->all());
     }
 
-    #[Route(path: '/api/_admin/sanitize-html', name: 'api.admin.sanitize-html', methods: ['POST'])]
+    #[Route(
+        path: '/api/_admin/sanitize-html',
+        name: 'api.admin.sanitize-html',
+        methods: [Request::METHOD_POST]
+    )]
     public function sanitizeHtml(Request $request, Context $context): JsonResponse
     {
         if (!$request->request->has('html')) {
@@ -348,27 +418,15 @@ class AdministrationController extends AbstractController
     {
         $sortedSupportedApiVersions = array_values($this->supportedApiVersions);
 
-        usort($sortedSupportedApiVersions, fn (int $version1, int $version2) => \version_compare((string) $version1, (string) $version2));
+        usort($sortedSupportedApiVersions, static fn (int $version1, int $version2) => \version_compare((string) $version1, (string) $version2));
 
         return array_pop($sortedSupportedApiVersions);
     }
 
-    private function getCustomerByEmail(string $customerId, string $email, Context $context, ?string $boundSalesChannelId): ?CustomerEntity
+    private function getCustomerById(string $customerId, Context $context): ?CustomerEntity
     {
-        $criteria = new Criteria();
-        $criteria->setLimit(1);
-        if ($boundSalesChannelId) {
-            $criteria->addAssociation('boundSalesChannel');
-        }
-
-        $criteria->addFilter(new EqualsFilter('email', $email));
-        $criteria->addFilter(new EqualsFilter('guest', false));
-        $criteria->addFilter(new NotEqualsFilter('id', $customerId));
-
-        $criteria->addFilter(new MultiFilter(MultiFilter::CONNECTION_OR, [
-            new EqualsFilter('boundSalesChannelId', null),
-            new EqualsFilter('boundSalesChannelId', $boundSalesChannelId),
-        ]));
+        $criteria = new Criteria([$customerId]);
+        $criteria->addAssociation('boundSalesChannel');
 
         return $this->customerRepository->search($criteria, $context)->getEntities()->first();
     }

@@ -3,32 +3,34 @@
 namespace Shopware\Core\Maintenance\Staging\Command;
 
 use Psr\EventDispatcher\EventDispatcherInterface;
-use Shopware\Core\Framework\Adapter\Console\ShopwareStyle;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Maintenance\Staging\Event\SetupStagingEvent;
+use Shopware\Core\Maintenance\System\Struct\DatabaseConnectionInformation;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
  * @internal
  *
  * @phpstan-import-type DomainRewriteRule from SetupStagingEvent
  */
+#[Package('framework')]
 #[AsCommand(
     name: 'system:setup:staging',
     description: 'Installs the Shopware 6 system in staging mode',
 )]
-#[Package('framework')]
 class SystemSetupStagingCommand extends Command
 {
     /**
      * @param list<DomainRewriteRule> $domainMappings
      * @param list<string> $extensionsToDisable
+     * @param array<string, array<string, mixed>> $systemConfigOverrides
      */
     public function __construct(
         private readonly EventDispatcherInterface $eventDispatcher,
@@ -36,6 +38,7 @@ class SystemSetupStagingCommand extends Command
         public readonly bool $disableMailDelivery,
         public readonly array $domainMappings,
         private readonly array $extensionsToDisable,
+        private readonly array $systemConfigOverrides = [],
     ) {
         parent::__construct();
     }
@@ -47,9 +50,10 @@ class SystemSetupStagingCommand extends Command
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new ShopwareStyle($input, $output);
+        $io = new SymfonyStyle($input, $output);
+        $databaseConnectionInformation = DatabaseConnectionInformation::fromEnv();
 
-        if (!$input->getOption('force') && !$io->confirm('This command will install the Shopware 6 system in staging mode. It will overwrite existing data in this database, make sure you use a staging database and have a backup', false)) {
+        if (!$input->getOption('force') && !$io->confirm(\sprintf('This command will install the Shopware 6 system in staging mode. It will overwrite existing data in the "%s" database, make sure you use a staging database and have a backup', $databaseConnectionInformation->getDatabaseName()), false)) {
             return self::FAILURE;
         }
 
@@ -59,10 +63,11 @@ class SystemSetupStagingCommand extends Command
             $this->disableMailDelivery,
             $this->domainMappings,
             $this->extensionsToDisable,
+            $this->systemConfigOverrides,
         );
         $this->eventDispatcher->dispatch($event);
 
-        $this->systemConfigService->set(SetupStagingEvent::CONFIG_FLAG, true);
+        $this->systemConfigService->set(SetupStagingEvent::CONFIG_FLAG, true, null, false);
 
         return $event->canceled ? self::FAILURE : self::SUCCESS;
     }

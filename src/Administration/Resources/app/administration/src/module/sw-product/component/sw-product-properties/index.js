@@ -26,14 +26,22 @@ export default {
         isAssociation: {
             type: Boolean,
             required: false,
-            // eslint-disable-next-line vue/no-boolean-default
             default: true,
         },
         showInheritanceSwitcher: {
             type: Boolean,
             required: false,
-            // eslint-disable-next-line vue/no-boolean-default
             default: true,
+        },
+        emptyStateTitle: {
+            type: String,
+            required: false,
+            default: null,
+        },
+        emptyStateDescription: {
+            type: String,
+            required: false,
+            default: null,
         },
     },
 
@@ -95,6 +103,7 @@ export default {
                     property: 'values',
                     label: 'sw-product.properties.columnValue',
                     sortable: false,
+                    multiLine: true,
                 },
             ];
         },
@@ -193,7 +202,9 @@ export default {
         },
 
         onDeleteProperty(property) {
-            this.$refs.entityListing.deleteId = null;
+            if (this.$refs.entityListing) {
+                this.$refs.entityListing.deleteId = null;
+            }
 
             this.$nextTick(() => {
                 this.productProperties
@@ -205,11 +216,14 @@ export default {
                     });
 
                 this.$refs.entityListing.resetSelection();
+                this.getProperties();
             });
         },
 
         onDeleteProperties() {
-            this.$refs.entityListing.showBulkDeleteModal = false;
+            if (this.$refs.entityListing) {
+                this.$refs.entityListing.showBulkDeleteModal = false;
+            }
 
             this.$nextTick(() => {
                 const properties = { ...this.$refs.entityListing.selection };
@@ -220,6 +234,7 @@ export default {
                     });
                 });
                 this.$refs.entityListing.resetSelection();
+                this.getProperties();
             });
         },
 

@@ -17,6 +17,7 @@ use Shopware\Core\Checkout\Order\Aggregate\OrderTransaction\OrderTransactionEnti
 use Shopware\Core\Checkout\Order\Aggregate\OrderTransaction\OrderTransactionStateHandler;
 use Shopware\Core\Checkout\Order\OrderCollection;
 use Shopware\Core\Checkout\Order\OrderEntity;
+use Shopware\Core\Content\Flow\Dispatching\BufferedFlowExecutor;
 use Shopware\Core\Content\Flow\Dispatching\Struct\ActionSequence;
 use Shopware\Core\Content\Flow\Events\FlowSendMailActionEvent;
 use Shopware\Core\Content\Flow\FlowCollection;
@@ -26,6 +27,7 @@ use Shopware\Core\Content\MailTemplate\Service\Event\MailBeforeSentEvent;
 use Shopware\Core\Content\Media\File\FileFetcher;
 use Shopware\Core\Content\Media\File\FileSaver;
 use Shopware\Core\Content\Product\ProductCollection;
+use Shopware\Core\Content\Product\ProductDefinition;
 use Shopware\Core\Content\Product\State;
 use Shopware\Core\Content\Test\Product\ProductBuilder;
 use Shopware\Core\Framework\Context;
@@ -35,6 +37,7 @@ use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\EqualsFilter;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Sorting\FieldSorting;
 use Shopware\Core\Framework\DataAbstractionLayer\Write\CloneBehavior;
 use Shopware\Core\Framework\Event\OrderAware;
+use Shopware\Core\Framework\Feature;
 use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Test\TestCaseBase\IntegrationTestBehaviour;
 use Shopware\Core\Framework\Test\TestCaseBase\SalesChannelApiTestBehaviour;
@@ -227,7 +230,7 @@ class GrantDownloadAccessActionTest extends TestCase
         $criteria = new Criteria();
         $criteria->addFilter(new EqualsFilter('mailTemplates.id', $data['templateId']));
 
-        $type = static::getContainer()->get('mail_template_type.repository')->search($criteria, $event->getContext())->first();
+        $type = static::getContainer()->get('mail_template_type.repository')->search($criteria, $event->getContext())->getEntities()->first();
 
         if (!$type instanceof MailTemplateTypeEntity || $type->getTechnicalName() !== MailTemplateTypes::MAILTYPE_DOWNLOADS_DELIVERY) {
             return null;
@@ -246,7 +249,10 @@ class GrantDownloadAccessActionTest extends TestCase
         $cart = $this->cartService->createNew($this->salesChannelContext->getToken());
         $cart = $this->addProducts($cart, $productDownloads);
 
-        return $this->cartService->order($cart, $this->salesChannelContext, new RequestDataBag());
+        $orderId = $this->cartService->order($cart, $this->salesChannelContext, new RequestDataBag());
+        static::getContainer()->get(BufferedFlowExecutor::class)->executeBufferedFlows();
+
+        return $orderId;
     }
 
     /**
@@ -258,14 +264,18 @@ class GrantDownloadAccessActionTest extends TestCase
         $criteria->addAssociation('lineItems.downloads');
         $criteria->addAssociation('deliveries');
 
-        $order = $this->orderRepository->search($criteria, $this->salesChannelContext->getContext())->first();
+        $order = $this->orderRepository->search($criteria, $this->salesChannelContext->getContext())->getEntities()->first();
         static::assertInstanceOf(OrderEntity::class, $order);
 
         $lineItems = $order->getLineItems();
         static::assertNotNull($lineItems);
         $lineItems->sortByPosition();
         static::assertCount(\count($productDownloads), $lineItems);
-        static::assertTrue($lineItems->hasLineItemWithState(State::IS_DOWNLOAD));
+        static::assertTrue($lineItems->hasLineItemWithType(ProductDefinition::TYPE_DIGITAL));
+
+        if (!Feature::isActive('v6.8.0.0')) {
+            static::assertTrue($lineItems->hasLineItemWithState(State::IS_DOWNLOAD));
+        }
 
         foreach ($productDownloads as $key => $downloadFiles) {
             $lineItem = $lineItems->getAt($key);
@@ -276,7 +286,7 @@ class GrantDownloadAccessActionTest extends TestCase
                 static::assertFalse($download->isAccessGranted());
 
                 try {
-                    $request = new Request(['downloadId' => $download->getId(), 'orderId' => $orderId]);
+                    $request = new Request([], [], ['downloadId' => $download->getId(), 'orderId' => $orderId]);
                     $this->downloadRoute->load($request, $this->salesChannelContext);
 
                     static::fail('Download route returned response without access granted');
@@ -290,7 +300,11 @@ class GrantDownloadAccessActionTest extends TestCase
         static::assertNotNull($order->getDeliveries());
         if (\in_array([], $productDownloads, true)) {
             static::assertNotNull($order->getLineItems());
-            static::assertTrue($order->getLineItems()->hasLineItemWithState(State::IS_PHYSICAL));
+            static::assertTrue($lineItems->hasLineItemWithType(ProductDefinition::TYPE_PHYSICAL));
+
+            if (!Feature::isActive('v6.8.0.0')) {
+                static::assertTrue($order->getLineItems()->hasLineItemWithState(State::IS_PHYSICAL));
+            }
             static::assertCount(1, $order->getDeliveries());
         } else {
             static::assertCount(0, $order->getDeliveries());
@@ -307,14 +321,18 @@ class GrantDownloadAccessActionTest extends TestCase
         $criteria = new Criteria([$orderId]);
         $criteria->addAssociation('lineItems.downloads.media');
 
-        $order = $this->orderRepository->search($criteria, $this->salesChannelContext->getContext())->first();
+        $order = $this->orderRepository->search($criteria, $this->salesChannelContext->getContext())->getEntities()->first();
         static::assertInstanceOf(OrderEntity::class, $order);
 
         $lineItems = $order->getLineItems();
         static::assertNotNull($lineItems);
         $lineItems->sortByPosition();
         static::assertCount(\count($productDownloads), $lineItems);
-        static::assertTrue($lineItems->hasLineItemWithState(State::IS_DOWNLOAD));
+        static::assertTrue($lineItems->hasLineItemWithType(ProductDefinition::TYPE_DIGITAL));
+
+        if (!Feature::isActive('v6.8.0.0')) {
+            static::assertTrue($lineItems->hasLineItemWithState(State::IS_DOWNLOAD));
+        }
 
         foreach ($productDownloads as $key => $downloadFiles) {
             $lineItem = $lineItems->getAt($key);
@@ -325,7 +343,7 @@ class GrantDownloadAccessActionTest extends TestCase
                 static::assertTrue($download->isAccessGranted());
                 static::assertNotNull($download->getMedia());
 
-                $request = new Request(['downloadId' => $download->getId(), 'orderId' => $orderId]);
+                $request = new Request([], [], ['downloadId' => $download->getId(), 'orderId' => $orderId]);
                 $response = $this->downloadRoute->load($request, $this->salesChannelContext);
                 static::assertInstanceOf(StreamedResponse::class, $response);
                 ob_start();
@@ -389,7 +407,8 @@ class GrantDownloadAccessActionTest extends TestCase
                 ->price(1.0)
                 ->tax('t1')
                 ->visibility()
-                ->add('downloads', array_map(function (string $file): array {
+                ->type($downloadFiles === [] ? ProductDefinition::TYPE_PHYSICAL : ProductDefinition::TYPE_DIGITAL)
+                ->add('downloads', array_map(static function (string $file): array {
                     [$fileName, $fileExtension] = explode('.', $file);
 
                     return [
@@ -432,10 +451,11 @@ class GrantDownloadAccessActionTest extends TestCase
                     ->addFilter(new EqualsFilter('orderId', $orderId))
                     ->addSorting(new FieldSorting('createdAt', FieldSorting::DESCENDING)),
                 $this->salesChannelContext->getContext()
-            )->first();
+            )->getEntities()->first();
         static::assertInstanceOf(OrderTransactionEntity::class, $transaction);
 
         $this->orderTransactionStateHandler->paid($transaction->getId(), $this->salesChannelContext->getContext());
+        static::getContainer()->get(BufferedFlowExecutor::class)->executeBufferedFlows();
     }
 
     private function cloneDefaultFlow(): void

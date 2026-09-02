@@ -13,10 +13,10 @@ use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\FieldVisibility;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\EntitySearchResult;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Test\TestCaseBase\SalesChannelFunctionalTestBehaviour;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\PlatformRequest;
-use Symfony\Component\HttpFoundation\ParameterBag;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\UnsupportedMediaTypeHttpException;
@@ -24,6 +24,7 @@ use Symfony\Component\HttpKernel\Exception\UnsupportedMediaTypeHttpException;
 /**
  * @internal
  */
+#[Package('framework')]
 class ResponseTypeRegistryTest extends TestCase
 {
     use SalesChannelFunctionalTestBehaviour;
@@ -138,7 +139,7 @@ class ResponseTypeRegistryTest extends TestCase
 
         $definition = static::getContainer()->get(CategoryDefinition::class);
         $request = Request::create($path, 'GET', [], [], [], ['HTTP_ACCEPT' => $accept]);
-        $this->setOrigin($request, $context);
+        $request->attributes->set(PlatformRequest::ATTRIBUTE_CONTEXT_OBJECT, $context);
 
         return $this->getFactory($request)->createDetailResponse(new Criteria(), $category, $definition, $request, $context, $setLocationHeader);
     }
@@ -154,7 +155,7 @@ class ResponseTypeRegistryTest extends TestCase
 
         $definition = static::getContainer()->get(CategoryDefinition::class);
         $request = Request::create($path, 'GET', [], [], [], ['HTTP_ACCEPT' => $accept]);
-        $this->setOrigin($request, $context);
+        $request->attributes->set(PlatformRequest::ATTRIBUTE_CONTEXT_OBJECT, $context);
 
         return $this->getFactory($request)->createListingResponse($criteria, $searchResult, $definition, $request, $context);
     }
@@ -167,13 +168,6 @@ class ResponseTypeRegistryTest extends TestCase
         $category->internalSetEntityData('category', new FieldVisibility([]));
 
         return $category;
-    }
-
-    private function setOrigin(Request $request, Context $context): void
-    {
-        /** @var ParameterBag $attributes */
-        $attributes = (new \ReflectionProperty(Request::class, 'attributes'))->getValue($request);
-        $attributes->set(PlatformRequest::ATTRIBUTE_CONTEXT_OBJECT, $context);
     }
 
     private function getFactory(Request $request): ResponseFactoryInterface

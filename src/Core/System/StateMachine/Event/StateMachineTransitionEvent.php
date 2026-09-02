@@ -7,6 +7,9 @@ use Shopware\Core\Framework\Event\NestedEvent;
 use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\System\StateMachine\Aggregation\StateMachineState\StateMachineStateEntity;
 
+/**
+ * @codeCoverageIgnore
+ */
 #[Package('checkout')]
 class StateMachineTransitionEvent extends NestedEvent
 {
@@ -16,6 +19,7 @@ class StateMachineTransitionEvent extends NestedEvent
         protected StateMachineStateEntity $fromPlace,
         protected StateMachineStateEntity $toPlace,
         protected Context $context,
+        protected ?string $internalComment = null,
     ) {
     }
 
@@ -42,5 +46,10 @@ class StateMachineTransitionEvent extends NestedEvent
     public function getContext(): Context
     {
         return $this->context;
+    }
+
+    public function getInternalComment(): ?string
+    {
+        return $this->internalComment;
     }
 }

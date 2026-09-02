@@ -7,6 +7,7 @@ use Shopware\Core\Checkout\Customer\ImitateCustomerTokenGenerator;
 use Shopware\Core\Checkout\Customer\Struct\ImitateCustomerToken;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\Validation\EntityExists;
+use Shopware\Core\Framework\Deprecation\BCChange\ParameterNameChange;
 use Shopware\Core\Framework\Feature;
 use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Plugin\Exception\DecorationPatternException;
@@ -22,12 +23,18 @@ use Shopware\Core\PlatformRequest;
 use Shopware\Core\System\SalesChannel\Context\AbstractSalesChannelContextFactory;
 use Shopware\Core\System\SalesChannel\ContextTokenResponse;
 use Shopware\Core\System\SalesChannel\SalesChannelContext;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Validator\Constraints\NotBlank;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
-#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [StoreApiRouteScope::ID], '_contextTokenRequired' => false])]
 #[Package('checkout')]
+#[Route(
+    defaults: [
+        PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [StoreApiRouteScope::ID],
+        PlatformRequest::ATTRIBUTE_CONTEXT_TOKEN_REQUIRED => false,
+    ]
+)]
 class ImitateCustomerRoute extends AbstractImitateCustomerRoute
 {
     final public const TOKEN = 'token';
@@ -60,10 +67,12 @@ class ImitateCustomerRoute extends AbstractImitateCustomerRoute
         throw new DecorationPatternException(self::class);
     }
 
-    /**
-     * @deprecated tag:v6.8.0 - reason:parameter-name-change - The parameter `$requestDataBag` will be renamed to `$data` to align with abstract route
-     */
-    #[Route(path: '/store-api/account/login/imitate-customer', name: 'store-api.account.imitate-customer-login', methods: ['POST'])]
+    #[ParameterNameChange(version: 'v6.8.0', parameterName: 'requestDataBag', newName: 'data', description: 'Aligns with the abstract route.')]
+    #[Route(
+        path: '/store-api/account/login/imitate-customer',
+        name: 'store-api.account.imitate-customer-login',
+        methods: [Request::METHOD_POST]
+    )]
     public function imitateCustomerLogin(RequestDataBag $requestDataBag, SalesChannelContext $context): ContextTokenResponse
     {
         $tokenString = $requestDataBag->getString(self::TOKEN);

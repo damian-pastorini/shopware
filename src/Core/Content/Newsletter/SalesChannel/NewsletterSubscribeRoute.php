@@ -15,9 +15,9 @@ use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\EqualsFilter;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\MultiFilter;
+use Shopware\Core\Framework\Feature;
 use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Plugin\Exception\DecorationPatternException;
-use Shopware\Core\Framework\RateLimiter\Exception\RateLimitExceededException;
 use Shopware\Core\Framework\RateLimiter\RateLimiter;
 use Shopware\Core\Framework\Routing\StoreApiRouteScope;
 use Shopware\Core\Framework\Util\Hasher;
@@ -32,6 +32,7 @@ use Shopware\Core\System\SalesChannel\Aggregate\SalesChannelDomain\SalesChannelD
 use Shopware\Core\System\SalesChannel\NoContentResponse;
 use Shopware\Core\System\SalesChannel\SalesChannelContext;
 use Shopware\Core\System\SalesChannel\StoreApiCustomFieldMapper;
+use Shopware\Core\System\SalesChannel\StoreApiResponse;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Routing\Attribute\Route;
@@ -41,8 +42,8 @@ use Symfony\Component\Validator\Constraints\NotBlank;
 use Symfony\Component\Validator\Constraints\Regex;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
-#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [StoreApiRouteScope::ID]])]
 #[Package('after-sales')]
+#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [StoreApiRouteScope::ID]])]
 class NewsletterSubscribeRoute extends AbstractNewsletterSubscribeRoute
 {
     final public const STATUS_NOT_SET = 'notSet';
@@ -98,9 +99,43 @@ class NewsletterSubscribeRoute extends AbstractNewsletterSubscribeRoute
         throw new DecorationPatternException(self::class);
     }
 
-    #[Route(path: '/store-api/newsletter/subscribe', name: 'store-api.newsletter.subscribe', methods: ['POST'])]
-    public function subscribe(RequestDataBag $dataBag, SalesChannelContext $context, bool $validateStorefrontUrl = true): NoContentResponse
+    /**
+     * @deprecated tag:v6.8.0
+     * Use subscribeWithResponse() instead.
+     * Starting with v6.8.0, the API route response is changing.
+     * This method will be removed.
+     */
+    public function subscribe(RequestDataBag $dataBag, SalesChannelContext $context, bool $validateStorefrontUrl = true): StoreApiResponse
     {
+        Feature::triggerDeprecationOrThrow(
+            'v6.8.0.0',
+            Feature::deprecatedMethodMessage(
+                self::class,
+                __FUNCTION__,
+                'v6.8.0.0',
+                'subscribeWithResponse()'
+            )
+        );
+
+        $this->subscribeWithResponse($dataBag, $context, $validateStorefrontUrl);
+
+        return new NoContentResponse();
+    }
+
+    // Decorators that do not override this method inherit a signature without a default, and the
+    // route then fails with "Could not resolve argument $validateStorefrontUrl".
+    #[Route(
+        path: '/store-api/newsletter/subscribe',
+        name: 'store-api.newsletter.subscribe',
+        defaults: ['validateStorefrontUrl' => true],
+        methods: ['POST']
+    )]
+    public function subscribeWithResponse(RequestDataBag $dataBag, SalesChannelContext $context, bool $validateStorefrontUrl = true): NewsletterSubscribeRouteResponse
+    {
+        if (($request = $this->requestStack->getMainRequest()) !== null && $request->getClientIp() !== null) {
+            $this->rateLimiter->ensureAccepted(RateLimiter::NEWSLETTER_FORM, $request->getClientIp());
+        }
+
         $doubleOptInDomain = $this->systemConfigService->getString(
             'core.newsletter.doubleOptInDomain',
             $context->getSalesChannelId()
@@ -115,14 +150,6 @@ class NewsletterSubscribeRoute extends AbstractNewsletterSubscribeRoute
         $validator = $this->getOptInValidator($dataBag, $context, $validateStorefrontUrl);
 
         $this->validator->validate($dataBag->all(), $validator);
-
-        if (($request = $this->requestStack->getMainRequest()) !== null && $request->getClientIp() !== null) {
-            try {
-                $this->rateLimiter->ensureAccepted(RateLimiter::NEWSLETTER_FORM, $request->getClientIp());
-            } catch (RateLimitExceededException $e) {
-                throw NewsletterException::newsletterThrottled($e->getWaitTime());
-            }
-        }
 
         $data = $dataBag->only(
             'email',
@@ -141,13 +168,13 @@ class NewsletterSubscribeRoute extends AbstractNewsletterSubscribeRoute
         $recipientId = $this->getNewsletterRecipientId($data['email'], $context);
 
         if ($recipientId !== null) {
-            $recipient = $this->newsletterRecipientRepository->search(new Criteria([$recipientId]), $context->getContext())->first();
+            $recipient = $this->newsletterRecipientRepository->search(new Criteria([$recipientId]), $context->getContext())->getEntities()->first();
             \assert($recipient instanceof NewsletterRecipientEntity);
 
             // If the user was previously subscribed but has unsubscribed now, the `getConfirmedAt()`
             // will still be set. So we need to check for the status as well.
             if ($recipient->getStatus() !== self::STATUS_OPT_OUT && $recipient->getConfirmedAt()) {
-                return new NoContentResponse();
+                return new NewsletterSubscribeRouteResponse($recipient->getStatus() ?? self::STATUS_NOT_SET);
             }
         }
 
@@ -171,7 +198,7 @@ class NewsletterSubscribeRoute extends AbstractNewsletterSubscribeRoute
             $event = new NewsletterConfirmEvent($context->getContext(), $recipient, $context->getSalesChannelId());
             $this->eventDispatcher->dispatch($event);
 
-            return new NoContentResponse();
+            return new NewsletterSubscribeRouteResponse($recipient->getStatus() ?? self::STATUS_NOT_SET);
         }
 
         $hashedEmail = Hasher::hash($data['email'], 'sha1');
@@ -180,7 +207,7 @@ class NewsletterSubscribeRoute extends AbstractNewsletterSubscribeRoute
         $event = new NewsletterRegisterEvent($context->getContext(), $recipient, $url, $context->getSalesChannelId());
         $this->eventDispatcher->dispatch($event);
 
-        return new NoContentResponse();
+        return new NewsletterSubscribeRouteResponse($recipient->getStatus() ?? self::STATUS_NOT_SET);
     }
 
     /**
@@ -229,19 +256,19 @@ class NewsletterSubscribeRoute extends AbstractNewsletterSubscribeRoute
     {
         $definition = new DataValidationDefinition('newsletter_recipient.create');
         $definition->add('email', new NotBlank(), new Email())
-            ->add('option', new NotBlank(), new Choice(array_keys($this->getOptionSelection($context, $dataBag->get('email')))));
+            ->add('option', new NotBlank(), new Choice(choices: array_keys($this->getOptionSelection($context, $dataBag->get('email')))));
 
-        if (!empty($dataBag->get('firstName'))) {
-            $definition->add('firstName', new NotBlank(), new Regex(pattern: self::DOMAIN_NAME_REGEX, match: false));
+        if ($dataBag->get('firstName') !== null && $dataBag->get('firstName') !== '') {
+            $definition->add('firstName', new NotBlank(), new Regex(pattern: self::DOMAIN_NAME_REGEX, message: 'error.urlNotAllowed', match: false));
         }
 
-        if (!empty($dataBag->get('lastName'))) {
-            $definition->add('lastName', new NotBlank(), new Regex(pattern: self::DOMAIN_NAME_REGEX, match: false));
+        if ($dataBag->get('lastName') !== null && $dataBag->get('lastName') !== '') {
+            $definition->add('lastName', new NotBlank(), new Regex(pattern: self::DOMAIN_NAME_REGEX, message: 'error.urlNotAllowed', match: false));
         }
 
         if ($validateStorefrontUrl) {
             $definition
-                ->add('storefrontUrl', new NotBlank(), new Choice(array_values($this->getDomainUrls($context))));
+                ->add('storefrontUrl', new NotBlank(), new Choice(choices: array_values($this->getDomainUrls($context))));
         }
 
         $validationEvent = new BuildValidationEvent($definition, $dataBag, $context->getContext());

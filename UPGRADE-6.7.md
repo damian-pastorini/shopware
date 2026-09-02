@@ -1,3 +1,194 @@
+# 6.7.14.0
+
+## Product export templates: media URLs are encoded automatically
+
+`ProductExportRenderer::renderBody()` now automatically RFC 3986-encodes `MediaEntity::url` and `MediaThumbnailEntity::url` values in the body-template data context. This covers media URLs such as `product.cover.media.url` and `product.media.*.media.url`; other string values, including product descriptions, SEO URLs, and custom fields, are unchanged.
+
+**Action required if your custom body template already encodes media URLs manually.**
+Templates that apply `|url_encode`, `|sw_encode_url`, `|sw_encode_media_url`, `|replace({' ': '%20'})`, or any other manual percent-encoding to a media URL will now produce double-encoded output, for example `%20` becomes `%2520`.
+
+Remove the manual encoding from your template body:
+
+```twig
+{# Before — no longer needed, will double-encode #}
+<g:image_link>{{ product.cover.media.url|url_encode }}</g:image_link>
+
+{# After — encoding is applied automatically #}
+<g:image_link>{{ product.cover.media.url }}</g:image_link>
+```
+
+For a URL-valued custom field or another non-media string, apply `sw_encode_url` explicitly:
+
+```twig
+<link>{{ product.customFields.external_url|sw_encode_url }}</link>
+```
+
+This affects the body template only. Header and footer templates, and URLs assembled entirely inside a Twig expression are not changed.
+
+## MCP server no longer uses the `MCP_SERVER` feature flag
+
+The experimental MCP server is now always enabled and the `MCP_SERVER` feature flag has been removed.
+
+- If you set `MCP_SERVER=1` (or `MCP_SERVER=0`) in your `.env`, remove it. The flag no longer has any effect.
+- The MCP endpoints (`/api/_mcp` and `/store-api/_mcp`) are now reachable whenever `symfony/mcp-bundle` is installed, with no flag to enable or disable them.
+- The MCP classes stay marked `@experimental` until 6.8.0, so the API may still change.
+
+## OpenAPI generator dependency upgraded to swagger-php 6.4
+
+Shopware now requires `zircote/swagger-php` 6.4 to generate OpenAPI 3.2 schemas.
+Extensions that only provide OpenAPI metadata through `OpenApi\Annotations` or `OpenApi\Attributes` are expected to keep working, but extension build tools or tests that use swagger-php's programmatic API may need small changes.
+
+The common migration path is:
+
+* Replace `OpenApi\Generator::scan($sources, ['logger' => $logger])` with `(new OpenApi\Generator($logger))->generate($sources)`.
+* Replace `OpenApi\Util::finder($directory)` with the directory path itself when passing sources to `Generator::generate()`, or use swagger-php 6's `SourceFinder` if you only target v6.
+* If custom processors need to support both old and new swagger-php versions, use `method_exists($generator, 'getProcessorPipeline')`: use `getProcessorPipeline()` / `setProcessorPipeline()` for v5/v6 and fall back to `getProcessors()` / `setProcessors()` for v4.
+* Prefer `OpenApi\Generator::isDefault($value)` over direct comparisons with `Generator::UNDEFINED` when code should keep working across versions.
+
+If your extension relies on swagger-php directly, declare an explicit Composer dependency instead of relying on Shopware's transitive dependency.
+For cross-version development tooling, use a constraint that covers the versions you test, for example `^4.9.2 || ^5.0 || ^6.4`.
+
+# 6.7.13.0
+
+## Storefront form validation messages use Shopware snippets
+
+Storefront form validation messages in `FormController` are now translated using the violation code through Shopware's translator instead of using the already translated Symfony validator message. This affects contact, newsletter, and revocation forms.
+
+If a plugin provides custom constraints used by these forms, add matching translations to `Resources/snippet/storefront.<locale>.json` below the `error` key. For example, the violation code `VIOLATION::MY_CUSTOM_ERROR` requires the snippet key `error.VIOLATION::MY_CUSTOM_ERROR`.
+
+## `LineItemPurchasePriceRule` uses a `type` field instead of `isNet`
+
+The rule condition `cartLineItemPurchasePrice` (`Shopware\Core\Checkout\Cart\Rule\LineItemPurchasePriceRule`) now stores the price type in a `type` field (`CartPrice::TAX_STATE_GROSS` = `gross` / `CartPrice::TAX_STATE_NET` = `net`) instead of the previous `isNet` boolean. The constructor argument changed from `bool $isNet` to `?string $type`.
+A migration (`Migration1781508123UpdateLineItemPurchasePriceRuleConditions`) rewrites existing `rule_condition` payloads automatically (`isNet: true` → `type: 'net'`, `isNet: false` → `type: 'gross'`).
+
+## Deprecation of rule builder line item condition components
+
+The following Administration rule builder condition components are deprecated and will be removed in v6.8.0. The affected conditions (`cartLineItemInCategory`, `cartLineItemPurchasePrice`) are now rendered generically via `sw-condition-generic`:
+
+* `sw-condition-line-item-in-category`
+* `sw-condition-line-item-purchase-price`
+* `sw-condition-is-net-select`
+
+## `sw-product-stream-filter` now reuses `sw-condition-base` styling
+
+The product-stream filter row now reuses the `sw-condition-base` layout instead of its own markup and styles.
+
+The twig blocks `sw_product_stream_filter` and `sw_product_stream_filter_container` are deprecated and will be removed in v6.8.0. Use `sw_condition_base` / `sw_condition_base_content` instead.
+
+## Deprecation of search settings twig blocks
+
+The following blocks in `src/Administration/Resources/app/administration/src/module/sw-settings-search/component/` have been deprecated and will be removed in v6.8.0:
+
+- `sw_settings_search_excluded_search_terms_empty_state_image` (`sw-settings-search-excluded-search-terms/sw-settings-search-excluded-search-terms.html.twig`)
+- `sw_settings_search_view_live_search_search_icon_wrapper` (`sw-settings-search-live-search/sw-settings-search-live-search.html.twig`)
+- `sw_settings_search_view_live_search_search_icon` (`sw-settings-search-live-search/sw-settings-search-live-search.html.twig`)
+- `sw_settings_search_search_index_warning_top` (`sw-settings-search-search-index/sw-settings-search-search-index.html.twig`)
+- `sw_settings_search_search_index_rebuild_progress_text` (`sw-settings-search-search-index/sw-settings-search-search-index.html.twig`)
+- `sw_settings_search_searchable_content_customfields_state_image` (`sw-settings-search-searchable-content-customfields/sw-settings-search-searchable-content-customfields.html.twig`)
+- `sw_settings_search_searchable_content_general_state_image` (`sw-settings-search-searchable-content-general/sw-settings-search-searchable-content-general.html.twig`)
+- `sw_settings_search_searchable_show_example` (`sw-settings-search-searchable-content/sw-settings-search-searchable-content.html.twig`)
+- `sw_settings_search_searchable_show_example_link_element` (`sw-settings-search-searchable-content/sw-settings-search-searchable-content.html.twig`)
+
+# 6.7.12.0
+
+## Deprecation of `sw_integration_list_introduction` twig block
+
+The block `sw_integration_list_introduction` in `src/Administration/Resources/app/administration/src/module/sw-integration/page/sw-integration-list/sw-integration-list.html.twig` has been deprecated and will be removed in v6.8.0.
+
+## Deprecation of `processSuccess` and `resetButtons` in `sw-settings-cache-index`
+
+The data property `processSuccess` and the method `resetButtons()` on the `sw-settings-cache-index` page component (`src/Administration/Resources/app/administration/src/module/sw-settings-cache/page/sw-settings-cache-index/index.js`) have been deprecated and will be removed in v6.8.0.
+
+## Rule builder condition error display rework
+
+`sw-condition-base` now reads errors directly from the `rule_condition` entity error store. A new `sw-condition-field-errors` component renders the labelled summary below the row.
+
+### Removals on `sw-condition-*` components
+
+* `mapPropertyErrors('condition', [...])` spreads have been removed from every individual `sw-condition-*` component, along with the `conditionValue*Error` computed properties they generated (e.g. `conditionValueOperatorError`). Read errors from the `rule_condition` entity error store instead.
+* The local `currentError` computed override has been removed from the individual `sw-condition-*` components; they now inherit `currentError` from `sw-condition-base`.
+* `hasError` prop on `sw-condition-type-select` has been removed.
+* `operatorClasses` and `hasError` computed properties on `sw-condition-operator-select` have been removed.
+* `typeSelectClasses` and `arrowColor` computed properties on `sw-condition-type-select` have been removed.
+* `currentError` has been removed from the `generic-condition.mixin.ts` mixin.
+
+## Deprecation of `sw_settings_mailer_headline_agent` twig block
+
+The block `sw_settings_mailer_headline_agent` in `src/Administration/Resources/app/administration/src/module/sw-settings-mailer/page/sw-settings-mailer/sw-settings-mailer.html.twig` has been deprecated and will be removed in v6.8.0.
+
+## `Feature::triggerDeprecationOrThrow` accepts an optional `introducedIn` parameter
+
+`Shopware\Core\Framework\Feature::triggerDeprecationOrThrow()` now accepts a third optional `?string $introducedIn = null` argument.
+When provided, the emitted deprecation message is prefixed with `Since shopware/core <introducedIn>:` per Symfony convention, enabling log aggregation by introduction version.
+When omitted, the deprecation is emitted without a `Since` prefix (previously the prefix was rendered with an empty version, producing the malformed `Since shopware/core : ...`).
+
+## (Opt-in) Dedicated `webhook` Messenger transport for webhook delivery
+
+**Opt-in via the `WEBHOOKS_REWORK` feature flag. Becomes the default in 6.8.** Background and behavioural impact are in `RELEASE_INFO-6.7.md`.
+
+> [!IMPORTANT]
+> Enabling the flag without updating the consume command (or the admin-worker transport list) leaves `webhook_delivery` rows piling up with no consumer.
+
+### Consume command
+
+Workers must list `webhook` explicitly — there is no runtime bridge. Put it first so retries do not wait behind async backlog:
+
+```bash
+bin/console messenger:consume webhook async low_priority --{other-options}....
+```
+
+The webhook transport has built-in fairness, so it never starves async. You can run multiple `messenger:consume webhook` processes in parallel — delivery is IO-bound and scales up to `num_apps + 1` partitions (one per app, plus the `default`). Beyond that, extra workers sit idle. Most installs need only one or two.
+
+### Admin worker transports
+
+The default `shopware.admin_worker.transports` already includes `webhook`. If you override it in `config/packages/shopware.yaml`, prepend `webhook`:
+
+```yaml
+shopware:
+    admin_worker:
+        transports: ["webhook", "async", "low_priority"]
+```
+
+### Rolling back
+
+To switch back to the previous behaviour:
+
+1. Disable the `WEBHOOKS_REWORK` feature flag. The `webhook` transport falls back to forwarding into `async`.
+2. Drop `webhook` from your `messenger:consume` invocations.
+3. If you overrode `shopware.admin_worker.transports` to include `webhook`, remove it.
+4. Send a graceful stop signal to any running `messenger:consume webhook` processes (`SIGTERM`, or `bin/console messenger:stop-workers`) and wait for them to exit so no in-flight rework delivery is left mid-batch.
+5. Run `bin/console webhook:drain-to-async` once to re-publish leftover `webhook_delivery` rows onto the `async` transport.
+
+The drain re-publishes every queued / pending-retry row in `webhook_delivery`, including rows the new async path may already have an envelope for — those webhooks will be sent twice. This is within the at-least-once delivery contract; receivers must deduplicate via `X-Shopware-Event-Id` (or the `eventId` in the body). Rows left in `running` from a crashed rework worker are not handled and need manual recovery (`UPDATE webhook_delivery SET delivery_status = 'queued' WHERE delivery_status = 'running';`, then re-run the drain).
+
+## Exception behavior changes in `CustomerBirthdayRule` and `LineItemCustomFieldRule`
+
+While adding the `between` operator for date rule conditions, two rule classes changed which exception they throw from `match()`:
+
+* `CustomerBirthdayRule::match()` no longer throws `CustomerException::unsupportedValue` when `$birthday` is `null` and the operator is not `OPERATOR_EMPTY`. The case now falls through to the existing null-guard and returns `RuleComparison::isNegativeOperator($operator)`.
+* `LineItemCustomFieldRule::match()` now delegates to `CustomFieldRule::match()`. An unknown operator therefore throws `RuleException::unsupportedOperator()` instead of `CartException::unsupportedOperator()`.
+
+## `RuleComparison` deprecations
+
+`RuleComparison` is deprecated for inheritance and will be `final` in v6.8.0.0.
+The `$ruleValue` parameter of `RuleComparison::date()` and `RuleComparison::datetime()` will be widened from `\DateTime` to `\DateTime|string|array` in v6.8.0.0.
+
+# 6.7.8.2
+
+## Digital product legacy states repair after update
+
+We fixed a bug in the indexer for the `product.states` field, which lead to issues where rules (and flows depending on those rules) with the `line item with product state` condition did not work as expected. This especially affected the flows to deliver digital download products after purchase.
+
+This release repairs digital products with missing legacy `states` via a one-time `UpdatePostFinishEvent` subscriber.
+
+The repair runs automatically once per installation and is marked as completed in `app_config`.
+
+# 6.7.6.0
+
+## Deprecation of video blocks
+
+The inner video blocks of `cms-block-vimeo-video.html.twig` and `cms-block-youtube-video.html.twig` called `block_image_inner` have been deprecated and will be removed in the next major version. Please use specific blocks `block_vimeo_video_inner` and `block_youtube_video_inner` instead.
+
 # 6.7.4.1
 
 The `Shopware\Core\Checkout\Customer\SalesChannel\ChangeEmailRoute` now deletes customer recovery links after a customer has changed their email address.
@@ -13,9 +204,9 @@ This makes it more consistent as otherwise the types could change when they are 
 
 ## Deprecated SystemConfig exceptions
 
-The exceptions 
-* `\Shopware\Core\System\SystemConfig\Exception\InvalidDomainException`, 
-* `\Shopware\Core\System\SystemConfig\Exception\InvalidKeyException`, and 
+The exceptions
+* `\Shopware\Core\System\SystemConfig\Exception\InvalidDomainException`,
+* `\Shopware\Core\System\SystemConfig\Exception\InvalidKeyException`, and
 * `\Shopware\Core\System\SystemConfig\Exception\InvalidSettingValueException`
 are now deprecated and will be removed in v6.8.0.0.
 Use the respective factory methods in `\Shopware\Core\System\SystemConfig\SystemConfigException` instead.
@@ -35,16 +226,16 @@ With this change, Vimeo and YouTube videos now use separate cookie consent entri
 
 ## Cookie offcanvas links in dynamically loaded content
 
-Links to open the cookie offcanvas that are loaded dynamically (e.g., within the navigation offcanvas) now work correctly. 
+Links to open the cookie offcanvas that are loaded dynamically (e.g., within the navigation offcanvas) now work correctly.
 The `CookieConfiguration` plugin now uses event delegation instead of direct event listeners.
 
-If you have extended the `CookieConfiguration` plugin and override `_registerEvents()`, you may need to update your 
+If you have extended the `CookieConfiguration` plugin and override `_registerEvents()`, you may need to update your
 implementation to use event delegation as well.
 
 # 6.7.3.1
 ## Opensearch 3.x compatibility
 
-OpenSearch 3.x introduced a breaking change that disallows defining index mapping fields with empty array `properties`. For e.g: 
+OpenSearch 3.x introduced a breaking change that disallows defining index mapping fields with empty array `properties`. For e.g:
 
 ```json
 {
@@ -120,7 +311,7 @@ The method `media` from `Shopware\Core\Content\Media\Event\MediaPathChangedEvent
 The method `thumbnail` from `Shopware\Core\Content\Media\Event\MediaPathChangedEvent` is deprecated and will be removed with the next major version. Use the newly added `thumbnailWithMimeType` method instead.
 ## Added caching to the `NavigationRoute`
 
-The navigation route now caches the default category levels for the current sales channel's main navigation. 
+The navigation route now caches the default category levels for the current sales channel's main navigation.
 This improves performance by reducing the need to repeatedly load and hydrate the same category levels on every page.
 
 When your navigation is dynamic, you need to subscribe to the `CategoryLevelLoaderCacheKeyEvent` to add the necessary information to the cache tag, so your dynamic content is displayed properly.
@@ -175,7 +366,7 @@ class CustomCookieProvider implements CookieProviderInterface
     public function getCookieGroups(): array
     {
         $cookieGroups = $this->inner->getCookieGroups();
-        
+
         $cookieGroups[] = [
             'snippet_name' => 'cookie.group.name',
             'entries' => [
@@ -184,7 +375,7 @@ class CustomCookieProvider implements CookieProviderInterface
                 ],
             ],
         ];
-        
+
         return $cookieGroups;
     }
 }
@@ -202,10 +393,10 @@ class AppCookieCollectListener
     {
         $cookieGroups = $event->cookieGroupCollection;
         $newCookieGroup = new CookieGroup('cookie.group.name');
-        
+
         $newCookieEntry = new CookieEntry('cookie-name')
         $newCookieGroup->setEntries([$entry]);
-        
+
         $cookieGroups->add($newCookieGroup);
     }
 }
@@ -277,13 +468,13 @@ The constructor of the `EntityDefinition` will be removed, therefore the call of
  class MyCustomEntity extends EntityDefinition
  {
      // snip
- 
+
      public function __construct(private readonly array $meta = [])
      {
 -        parent::__construct();
          // ...
      }
- 
+
      // snip
  }
 ```
@@ -365,8 +556,8 @@ When rendering CMS block components in the Administration, the `component` prope
 
 ## Return address in documents
 
-The option `Display company` address in the `Company settings` section of the document configuration is now split into `Display return address` and `Display company address`.  
-The former toggles the display of the return address above the customer address in the address block.  
+The option `Display company` address in the `Company settings` section of the document configuration is now split into `Display return address` and `Display company address`.
+The former toggles the display of the return address above the customer address in the address block.
 The latter toggles the display of the company address below the header on the right-hand side of the document.
 
 ## New Elasticsearch enhancement for optimized storefront searching and sorting
@@ -423,7 +614,7 @@ $seoUrls->add($url);
 After
 
 ```php
-$url = 'https://example.com/cross-selling/product-123'; 
+$url = 'https://example.com/cross-selling/product-123';
 $entities = $data->getAll($definition, $url->getForeignKey());
 
 // Now you have to loop through all entities to add the SEO URL
@@ -489,13 +680,13 @@ The Twig breadcrumb functions `sw_breadcrumb_full` and `sw_breadcrumb_full_by_id
 ```
 ## ThemeConfiguration deprecations
 
-The `label` and `helpText` fields in the `/api/_action/theme/{themeId}/configuration` and in the 
+The `label` and `helpText` fields in the `/api/_action/theme/{themeId}/configuration` and in the
 `/api/_action/theme/{themeId}/structured-fields` API endpoints have been deprecated. For translations you should rely on
 the `labelSnippetKey` and `helpTextSnippetKey` fields instead (present only in the structured fields endpoint).
 
 The `ThemeService::getThemeConfiguration` and `ThemeService::getThemeConfigurationStructuredFields` methods have been
 deprecated in favor of the new `ThemeConfigurationService::getPlainThemeConfiguration` and
-`ThemeConfigurationService::getThemeConfigurationFieldStructure` methods. The new methods return the same data as the old ones, 
+`ThemeConfigurationService::getThemeConfigurationFieldStructure` methods. The new methods return the same data as the old ones,
 excluding the deprecated fields.
 
 
@@ -527,7 +718,7 @@ This is useful when the user can provide measurement units in the header and get
 
 For the storefront, we added a new twig filter `sw_convert_unit` to convert measurement units in twig templates. This allows the developers to convert measurement units in the templates without writing custom logic.
 
-It allows the developers to convert measurement units of any value, any variable in the templates without writing custom logic. 
+It allows the developers to convert measurement units of any value, any variable in the templates without writing custom logic.
 
 Or they can also convert between any measurement units by passing the desired measurement unit as a parameter to the filter.
 
@@ -584,7 +775,7 @@ If you want to keep the old behaviour you need to overwrite the template blocks 
 # Notable Changes
 
 # Webpack to vite migration for the administration
-We are switching the build system for our administration from webpack to vite. 
+We are switching the build system for our administration from webpack to vite.
 This means that when your plugins depends on a custom `webpack.config.js` file, you'll need to migrate it to a `vite.config.js` file.
 **More information about how to upgrade will be available soon.**
 
@@ -633,7 +824,7 @@ Shopware.State.registerModule('example', {
             // Do some async stuff
             return Promise.resolve(() => {
                 commit('setId', id);
-                
+
                 return id;
             });
         }
@@ -677,7 +868,7 @@ If you are still using Vuex, please update your code accordingly:
 For more information refer to the [docs](https://developer.shopware.com/docs/resources/references/adr/2024-06-17-replace-vuex-with-pinia.html#replace-vuex-with-pinia).
 
 ## vue-i18n v10 Update
-We have updated `vue-i18n` to version 10, which introduces a significant change by removing the `tc` function. In Shopware, `$tc` remains available on Vue components, but it now internally references the `t` function from `vue-i18n`. 
+We have updated `vue-i18n` to version 10, which introduces a significant change by removing the `tc` function. In Shopware, `$tc` remains available on Vue components, but it now internally references the `t` function from `vue-i18n`.
 
 ### Key Considerations
 - While this change works for most use cases, some specific function overloads are no longer supported.
@@ -991,10 +1182,10 @@ The hidden radio input will no longer be in the HTML. The current page value wil
 
 {# All information that was previously on the radio input, is now also on the anchor link. The id attribute is longer needed. The "disabled" state is now controlled via the parent `<li>` and tabindex. #}
 {% block component_pagination_first_link_element %}
-    <a href="{{ href ? '?p=1' ~ searchQuery : '#' }}" 
+    <a href="{{ href ? '?p=1' ~ searchQuery : '#' }}"
        class="page-link some-special-class"
        data-page="1"
-       aria-label="{{ 'general.first'|trans|striptags }}" 
+       aria-label="{{ 'general.first'|trans|striptags }}"
        data-focus-id="first"
        {% if currentPage == 1 %} tabindex="-1" aria-disabled="true"{% endif %}>
         {# Using text instead of icon and add some special CSS class #}
@@ -1068,14 +1259,14 @@ Storefront icons that are rendered via `{% sw_icon 'icon-name' %}` will apply `a
 In most scenarios icons are of decorative nature and should therefore not be read as "graphic" by the screen reader. **This change does not affect the actual rendering or appearance of the icons.**
 In many areas the icons were already set to `ariaHidden: true` manually. For things like "icon only" buttons there should always be an alternative text available that describes the action.
 
-It is still possible to disable `aria-hidden` by applying `ariaHidden: false` on the icon: 
+It is still possible to disable `aria-hidden` by applying `ariaHidden: false` on the icon:
 ```twig
 {% sw_icon 'plus' style { ariaHidden: false } %}
 ```
 
 ```twig
-{# 
-    Icon only button 
+{#
+    Icon only button
     ======================================================
 #}
 <button class="btn btn-primary my-action" aria-label="Label for icon only button">
@@ -1089,8 +1280,8 @@ It is still possible to disable `aria-hidden` by applying `ariaHidden: false` on
     </div>
 </button>
 
-{# 
-    Additional icon button 
+{#
+    Additional icon button
     ======================================================
 #}
 <button class="btn btn-primary my-action">
@@ -1106,7 +1297,7 @@ It is still possible to disable `aria-hidden` by applying `ariaHidden: false` on
     Label for the button {# Button is labelled by the actual text. #}
 </button>
 
-{# 
+{#
     Label for icon SVG
     ======================================================
 #}
@@ -1156,7 +1347,7 @@ The default payment method "Direct debit" will no longer automatically change th
 The `technicalName` property will be required for payment and shipping methods in the API.
 The `technical_name` column will be made non-nullable for the `payment_method` and `shipping_method` tables in the database.
 
-Plugin developers will be required to supply a `technicalName` for their payment and shipping methods.  
+Plugin developers will be required to supply a `technicalName` for their payment and shipping methods.
 **If no technical name is specified before the migration is run, a temporary placeholder `temporary_<method-id>` will be used instead.**
 
 Merchants must review their custom created payment and shipping methods for the new `technicalName` property and update their methods through the administration accordingly.
@@ -1384,7 +1575,7 @@ The following methods of the `\Shopware\Core\Framework\DataAbstractionLayer\Enti
 </details>
 
 ## Attributes classes made final
-We have made attribute classes final. 
+We have made attribute classes final.
 <details>
   <summary>See the detailed list</summary>
 
@@ -1414,7 +1605,7 @@ We have made attribute classes final.
 The following classes have been moved from the admin bundle to the core:
 
 * `Shopware\Core\Framework\Notification\NotificationCollection`
-* `Shopware\Core\Framework\Notification\NotificationDefinition` 
+* `Shopware\Core\Framework\Notification\NotificationDefinition`
 * `Shopware\Core\Framework\Notification\NotificationEntity`
 
 The controller `Shopware\Core\Framework\Notification\Api\NotificationController` has been moved from the admin bundle to the core and made internal.
@@ -3306,11 +3497,11 @@ The general usage of `Resources/views/storefront/utilities/alert.html.twig` and 
 Before:
 ```html
 <div role="alert" class="alert alert-info d-flex align-items-center">
-    <span class="icon icon-info"><svg></svg></span>                                                    
+    <span class="icon icon-info"><svg></svg></span>
     <div class="alert-content-container">
-        <div class="alert-content">                                                    
+        <div class="alert-content">
             Your shopping cart is empty.
-        </div>                
+        </div>
     </div>
 </div>
 ```
@@ -3318,7 +3509,7 @@ Before:
 After:
 ```html
 <div role="alert" class="alert alert-info d-flex align-items-center">
-    <span class="icon icon-info"><svg></svg></span>                                                    
+    <span class="icon icon-info"><svg></svg></span>
     <div class="alert-content-container">
         Your shopping cart is empty.
     </div>
@@ -3390,8 +3581,8 @@ After:
 const paramsObj = Object.fromEntries(new URLSearchParams(window.location.search).entries());
 ```
 
-## Added new functions and tokens to complete the Twig integration 
-New functions: `sw_block`, `sw_source`, `sw_include` and new tokens: `sw_use`, `sw_embed`, `sw_from` and `sw_import`. 
+## Added new functions and tokens to complete the Twig integration
+New functions: `sw_block`, `sw_source`, `sw_include` and new tokens: `sw_use`, `sw_embed`, `sw_from` and `sw_import`.
 
 You can find further details on the use on the documentation page [Shopware's twig functions](https://developer.shopware.com/docs/resources/references/storefront-reference/twig-function-reference.html).
 
@@ -3467,7 +3658,7 @@ $bundles = [
 ];
 ```
 
-When you use a [symfony flex setup](https://developer.shopware.com/docs/guides/installation/template.html#symfony-flex) it should pick up the change automatically and apply [that change](https://github.com/shopware/recipes/blob/main/shopware/core/6.7/manifest.json#L34) during the shopware update. 
+When you use a [symfony flex setup](https://developer.shopware.com/docs/guides/installation/template.html#symfony-flex) it should pick up the change automatically and apply [that change](https://github.com/shopware/recipes/blob/main/shopware/core/6.7/manifest.json#L34) during the shopware update.
 
 ## Search server now provides OpenSearch/Elasticsearch shards and replicas
 
@@ -3505,7 +3696,7 @@ The fine-grained caching mechanism for system-config, snippets and theme config 
 
 ## `SQL_SET_DEFAULT_SESSION_VARIABLE` has no effect anymore
 
-Removed `SQL_SET_DEFAULT_SESSION_VARIABLES` env variable. It has no effect anymore. 
+Removed `SQL_SET_DEFAULT_SESSION_VARIABLES` env variable. It has no effect anymore.
 The previously optional performance tweaks to MySQL are now enforced on connection buildup inside the `\Shopware\Core\Framework\Adapter\Database\MySQLFactory`.
 
 ## Removal of RSA JWT secrets

@@ -107,7 +107,7 @@ export default {
             const formattedTaxes = `${calcTaxes
                 .map(
                     (calcTax) =>
-                        `${this.$tc(
+                        `${this.$t(
                             'sw-order.detailBase.shippingCostsTax',
                             {
                                 taxRate: calcTax.taxRate,
@@ -118,7 +118,7 @@ export default {
                 )
                 .join('<br>')}`;
 
-            return `${this.$tc('sw-order.detailBase.tax')}<br>${formattedTaxes}`;
+            return `${this.$t('sw-order.detailBase.tax')}<br>${formattedTaxes}`;
         },
 
         sortedCalculatedTaxes() {
@@ -207,12 +207,16 @@ export default {
             ]);
         },
 
-        reloadEntityData() {
+        reloadEntityData(isSaved = true) {
             if (this.swOrderDetailOnReloadEntityData) {
-                this.swOrderDetailOnReloadEntityData();
+                this.swOrderDetailOnReloadEntityData(isSaved);
             } else {
-                this.$emit('reload-entity-data');
+                this.$emit('reload-entity-data', isSaved);
             }
+        },
+
+        discardLineItemEdit() {
+            this.reloadEntityData(false);
         },
 
         saveAndReload() {

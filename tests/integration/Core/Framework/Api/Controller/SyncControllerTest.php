@@ -4,9 +4,7 @@ namespace Shopware\Tests\Integration\Core\Framework\Api\Controller;
 
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
-use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Shopware\Core\Content\Category\CategoryDefinition;
 use Shopware\Core\Content\Product\DataAbstractionLayer\ProductIndexer;
@@ -15,10 +13,11 @@ use Shopware\Core\Content\Product\ProductDefinition;
 use Shopware\Core\Defaults;
 use Shopware\Core\Framework\Api\Controller\SyncController;
 use Shopware\Core\Framework\DataAbstractionLayer\Indexing\EntityIndexerRegistry;
-use Shopware\Core\Framework\Increment\AbstractIncrementer;
-use Shopware\Core\Framework\Increment\IncrementGatewayRegistry;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Test\TestCaseBase\AdminApiTestBehaviour;
 use Shopware\Core\Framework\Test\TestCaseBase\IntegrationTestBehaviour;
+use Shopware\Core\Framework\Test\TestCaseBase\QueueTestBehaviour;
+use Shopware\Core\Framework\Test\TestCaseHelper\TestUser;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\PlatformRequest;
 use Symfony\Component\HttpFoundation\Response;
@@ -26,22 +25,18 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * @internal
  */
-#[CoversClass(SyncController::class)]
-#[Group('slow')]
+#[Package('framework')]
 class SyncControllerTest extends TestCase
 {
     use AdminApiTestBehaviour;
     use IntegrationTestBehaviour;
+    use QueueTestBehaviour;
 
     private Connection $connection;
-
-    private AbstractIncrementer $gateway;
 
     protected function setUp(): void
     {
         $this->connection = static::getContainer()->get(Connection::class);
-        $this->gateway = static::getContainer()->get('shopware.increment.gateway.registry')->get(IncrementGatewayRegistry::MESSAGE_QUEUE_POOL);
-        $this->gateway->reset('message_queue_stats');
     }
 
     public function testMultipleProductInsert(): void
@@ -138,7 +133,7 @@ class SyncControllerTest extends TestCase
         $response = $this->getBrowser()->getResponse();
         static::assertSame(Response::HTTP_OK, $response->getStatusCode());
 
-        $responseData = json_decode((string) $response->getContent(), true, \JSON_THROW_ON_ERROR, \JSON_THROW_ON_ERROR);
+        $responseData = json_decode((string) $response->getContent(), true, flags: \JSON_THROW_ON_ERROR);
         static::assertFalse($responseData['data']['attributes']['active']);
 
         $this->getBrowser()->request('DELETE', '/api/product/' . $id);
@@ -333,6 +328,56 @@ class SyncControllerTest extends TestCase
         static::assertEmpty($exists);
     }
 
+    public function testCriteriaDeleteRequiresReadPrivilegesForCriteriaSelection(): void
+    {
+        $victimId = Uuid::randomHex();
+        $controlId = Uuid::randomHex();
+        $manufacturerName = Uuid::randomHex();
+
+        foreach ([$victimId => $manufacturerName, $controlId => Uuid::randomHex()] as $productId => $name) {
+            $this->getBrowser()->jsonRequest('POST', '/api/product', [
+                'id' => $productId,
+                'productNumber' => Uuid::randomHex(),
+                'stock' => 1,
+                'name' => Uuid::randomHex(),
+                'tax' => ['name' => Uuid::randomHex(), 'taxRate' => 15],
+                'manufacturer' => ['name' => $name],
+                'price' => [['currencyId' => Defaults::CURRENCY, 'gross' => 50, 'net' => 25, 'linked' => false]],
+            ]);
+
+            static::assertSame(Response::HTTP_NO_CONTENT, $this->getBrowser()->getResponse()->getStatusCode(), (string) $this->getBrowser()->getResponse()->getContent());
+        }
+
+        TestUser::createNewTestUser($this->connection, ['product:delete'])->authorizeBrowser($this->getBrowser());
+
+        $this->getBrowser()->jsonRequest('POST', '/api/_action/sync', [[
+            'action' => SyncController::ACTION_DELETE,
+            'entity' => ProductDefinition::ENTITY_NAME,
+            'criteria' => [[
+                'type' => 'equals',
+                'field' => 'manufacturer.name',
+                'value' => $manufacturerName,
+            ]],
+        ]]);
+
+        $response = $this->getBrowser()->getResponse();
+        $content = (string) $response->getContent();
+
+        static::assertSame(Response::HTTP_FORBIDDEN, $response->getStatusCode(), $content);
+        static::assertSame(
+            ['product:read', 'product_manufacturer:read'],
+            json_decode(json_decode($content, true, flags: \JSON_THROW_ON_ERROR)['errors'][0]['detail'], true, flags: \JSON_THROW_ON_ERROR)['missingPrivileges']
+        );
+
+        $existingIds = $this->connection->fetchFirstColumn(
+            'SELECT LOWER(HEX(id)) FROM product WHERE id IN (:ids)',
+            ['ids' => [Uuid::fromHexToBytes($victimId), Uuid::fromHexToBytes($controlId)]],
+            ['ids' => ArrayParameterType::BINARY]
+        );
+
+        static::assertEqualsCanonicalizing([$victimId, $controlId], $existingIds);
+    }
+
     public function testIndexingByQueueHeader(): void
     {
         $product = Uuid::randomHex();
@@ -354,9 +399,6 @@ class SyncControllerTest extends TestCase
             ],
         ];
 
-        $this->connection->executeStatement('DELETE FROM messenger_messages;');
-        $this->connection->executeStatement('DELETE FROM `increment`;');
-
         $this->getBrowser()->request(
             'POST',
             '/api/_action/sync',
@@ -374,10 +416,8 @@ class SyncControllerTest extends TestCase
 
         static::assertNotEmpty($exists);
 
-        $messages = $this->gateway->list('message_queue_stats');
-
-        static::assertNotEmpty($messages);
-        static::assertSame(1, $messages[ProductIndexingMessage::class]['count']);
+        $queuedMessages = $this->getDispatchedMessageCount(ProductIndexingMessage::class);
+        static::assertSame(1, $queuedMessages);
     }
 
     public function testDirectIndexing(): void
@@ -401,12 +441,6 @@ class SyncControllerTest extends TestCase
             ],
         ];
 
-        $this->connection->executeStatement('DELETE FROM messenger_messages;');
-        $this->connection->executeStatement('DELETE FROM `increment`;');
-
-        $keys = $this->gateway->list('message_queue_stats');
-        static::assertEmpty($keys);
-
         $this->getBrowser()->request(
             'POST',
             '/api/_action/sync',
@@ -424,8 +458,7 @@ class SyncControllerTest extends TestCase
 
         static::assertNotEmpty($exists);
 
-        $keys = $this->gateway->list('message_queue_stats');
-        static::assertEmpty($keys);
+        static::assertSame(0, $this->getDispatchedMessageCount(ProductIndexingMessage::class));
     }
 
     public function testSkipIndexer(): void
@@ -512,7 +545,7 @@ class SyncControllerTest extends TestCase
             return $index !== ProductIndexer::SEARCH_KEYWORD_UPDATER;
         });
 
-        static::assertEqualsCanonicalizing($allProductIndexerMinusSearchKeyword, $skip);
+        static::assertEqualsCanonicalizing(array_values($allProductIndexerMinusSearchKeyword), array_values($skip));
     }
 
     public static function invalidOperationProvider(): \Generator

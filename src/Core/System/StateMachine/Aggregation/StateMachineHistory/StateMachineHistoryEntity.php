@@ -10,6 +10,9 @@ use Shopware\Core\System\StateMachine\Aggregation\StateMachineState\StateMachine
 use Shopware\Core\System\StateMachine\StateMachineEntity;
 use Shopware\Core\System\User\UserEntity;
 
+/**
+ * @codeCoverageIgnore
+ */
 #[Package('checkout')]
 class StateMachineHistoryEntity extends Entity
 {
@@ -42,6 +45,10 @@ class StateMachineHistoryEntity extends Entity
     protected ?IntegrationEntity $integration = null;
 
     protected string $transitionActionName;
+
+    protected ?string $internalComment = null;
+
+    protected ?string $sourceType = null;
 
     public function getTransitionActionName(): string
     {
@@ -181,5 +188,25 @@ class StateMachineHistoryEntity extends Entity
     public function setIntegration(?IntegrationEntity $integration): void
     {
         $this->integration = $integration;
+    }
+
+    public function getInternalComment(): ?string
+    {
+        return $this->internalComment;
+    }
+
+    public function setInternalComment(?string $internalComment): void
+    {
+        $this->internalComment = $internalComment;
+    }
+
+    public function getSourceType(): ?string
+    {
+        return $this->sourceType;
+    }
+
+    public function setSourceType(?string $sourceType): void
+    {
+        $this->sourceType = $sourceType;
     }
 }

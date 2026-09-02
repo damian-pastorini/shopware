@@ -13,11 +13,11 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
+#[Package('framework')]
 #[AsCommand(
     name: 'es:index:cleanup',
     description: 'Clean outdated indices',
 )]
-#[Package('framework')]
 class ElasticsearchCleanIndicesCommand extends Command
 {
     /**
@@ -46,7 +46,7 @@ class ElasticsearchCleanIndicesCommand extends Command
         $io = new SymfonyStyle($input, $output);
         $indices = $this->outdatedIndexDetector->get();
 
-        if (empty($indices)) {
+        if ($indices === null || $indices === []) {
             $io->writeln('No indices to be deleted.');
 
             return self::SUCCESS;

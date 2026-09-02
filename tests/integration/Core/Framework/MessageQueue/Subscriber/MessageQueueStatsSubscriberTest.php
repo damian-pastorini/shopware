@@ -3,8 +3,10 @@
 namespace Shopware\Tests\Integration\Core\Framework\MessageQueue\Subscriber;
 
 use PHPUnit\Framework\TestCase;
+use Shopware\Core\Framework\Feature;
 use Shopware\Core\Framework\Increment\AbstractIncrementer;
 use Shopware\Core\Framework\Increment\IncrementGatewayRegistry;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Test\MessageQueue\fixtures\BarMessage;
 use Shopware\Core\Framework\Test\MessageQueue\fixtures\FooMessage;
 use Shopware\Core\Framework\Test\TestCaseBase\IntegrationTestBehaviour;
@@ -13,12 +15,20 @@ use Shopware\Tests\Integration\Core\Framework\MessageQueue\fixtures\NoHandlerMes
 use Symfony\Component\Messenger\MessageBusInterface;
 
 /**
+ * @deprecated tag:v6.8.0 - Test class tests increment-based stats which will be removed
+ *
  * @internal
  */
+#[Package('framework')]
 class MessageQueueStatsSubscriberTest extends TestCase
 {
     use IntegrationTestBehaviour;
     use QueueTestBehaviour;
+
+    protected function setUp(): void
+    {
+        Feature::skipTestIfActive('v6.8.0.0', $this);
+    }
 
     public function testListener(): void
     {

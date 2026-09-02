@@ -45,7 +45,7 @@ class ConnectionProfiler extends DataCollector implements LateDataCollectorInter
     {
         $profilingMiddleware = current(array_filter(
             $this->connection->getConfiguration()->getMiddlewares(),
-            fn (MiddlewareInterface $middleware) => $middleware instanceof ProfilingMiddleware
+            static fn (MiddlewareInterface $middleware) => $middleware instanceof ProfilingMiddleware
         ));
 
         if ($profilingMiddleware === false) {
@@ -122,8 +122,6 @@ class ConnectionProfiler extends DataCollector implements LateDataCollectorInter
 
         $this->data = ['queries' => $this->collectQueries(), 'connections' => $this->connections];
         $this->groupedQueries = null;
-
-        $this->dataHolder->reset();
     }
 
     /**

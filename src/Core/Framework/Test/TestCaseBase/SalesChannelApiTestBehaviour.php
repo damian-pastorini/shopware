@@ -118,7 +118,7 @@ trait SalesChannelApiTestBehaviour
 
         // After login successfully, the context token will be set in the header
         $contextToken = $response->headers->get(PlatformRequest::HEADER_CONTEXT_TOKEN) ?? '';
-        if (empty($contextToken)) {
+        if ($contextToken === '') {
             throw new \RuntimeException('Cannot login with the given credential account');
         }
 
@@ -195,7 +195,7 @@ trait SalesChannelApiTestBehaviour
             'shippingMethods' => [['id' => $shippingMethod->getId()]],
             'navigationCategoryId' => $this->getValidCategoryId(),
             'countryId' => $this->getValidCountryId(null),
-            'currencies' => [['id' => Defaults::CURRENCY]],
+            'currencies' => [['id' => $salesChannelOverride['currencyId'] ?? Defaults::CURRENCY]],
             'languages' => $salesChannelOverride['languages'] ?? [['id' => Defaults::LANGUAGE_SYSTEM]],
             'customerGroupId' => TestDefaults::FALLBACK_CUSTOMER_GROUP,
             'domains' => [

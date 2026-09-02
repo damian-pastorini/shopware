@@ -68,7 +68,7 @@ class LineItemListPriceRatioRule extends Rule
     public function getConfig(): RuleConfig
     {
         return (new RuleConfig())
-            ->operatorSet(RuleConfig::OPERATOR_SET_NUMBER, true)
+            ->operatorSet(RuleConfig::OPERATOR_SET_NUMBER, true, true)
             ->numberField('amount');
     }
 
@@ -77,6 +77,10 @@ class LineItemListPriceRatioRule extends Rule
      */
     private function matchesListPriceCondition(LineItem $lineItem): bool
     {
+        if ($lineItem->getType() !== LineItem::PRODUCT_LINE_ITEM_TYPE) {
+            return false;
+        }
+
         $calculatedPrice = $lineItem->getPrice();
 
         if (!$calculatedPrice instanceof CalculatedPrice) {
@@ -88,6 +92,10 @@ class LineItemListPriceRatioRule extends Rule
         $listPriceRatioAmount = null;
         if ($listPrice instanceof ListPrice) {
             $listPriceRatioAmount = (100 - $listPrice->getPercentage()) / 100;
+        }
+
+        if ($listPriceRatioAmount === null && $this->operator !== Rule::OPERATOR_EMPTY) {
+            $listPriceRatioAmount = 0.0;
         }
 
         return RuleComparison::numeric($listPriceRatioAmount, (float) $this->amount, $this->operator);

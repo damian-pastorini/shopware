@@ -21,8 +21,8 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
 
-#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [ApiRouteScope::ID]])]
 #[Package('checkout')]
+#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [ApiRouteScope::ID]])]
 class StateMachineActionController extends AbstractController
 {
     /**
@@ -42,7 +42,7 @@ class StateMachineActionController extends AbstractController
         string $entityId
     ): JsonResponse {
         $this->validatePrivilege($entityName, AclRoleDefinition::PRIVILEGE_READ, $context);
-        $stateFieldName = (string) $request->query->get('stateFieldName', 'stateId');
+        $stateFieldName = $request->query->getString('stateFieldName', 'stateId');
 
         $availableTransitions = $this->stateMachineRegistry->getAvailableTransitions(
             $entityName,
@@ -85,13 +85,16 @@ class StateMachineActionController extends AbstractController
     ): Response {
         $this->validatePrivilege($entityName, AclRoleDefinition::PRIVILEGE_UPDATE, $context);
 
-        $stateFieldName = (string) $request->query->get('stateFieldName', 'stateId');
+        $stateFieldName = $request->query->getString('stateFieldName', 'stateId');
+        $internalComment = $request->request->getString('internalComment') ?: null;
+
         $stateMachineStateCollection = $this->stateMachineRegistry->transition(
             new Transition(
                 $entityName,
                 $entityId,
                 $transition,
-                $stateFieldName
+                $stateFieldName,
+                $internalComment,
             ),
             $context
         );

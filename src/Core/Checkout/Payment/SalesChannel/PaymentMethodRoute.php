@@ -4,6 +4,7 @@ namespace Shopware\Core\Checkout\Payment\SalesChannel;
 
 use Shopware\Core\Checkout\Payment\Hook\PaymentMethodRouteHook;
 use Shopware\Core\Checkout\Payment\PaymentMethodCollection;
+use Shopware\Core\Checkout\Payment\PaymentMethodDefinition;
 use Shopware\Core\Framework\Adapter\Cache\CacheTagCollector;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\EqualsFilter;
@@ -19,8 +20,8 @@ use Shopware\Core\System\SalesChannel\SalesChannelContext;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
 
-#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [StoreApiRouteScope::ID]])]
 #[Package('checkout')]
+#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [StoreApiRouteScope::ID]])]
 class PaymentMethodRoute extends AbstractPaymentMethodRoute
 {
     final public const ALL_TAG = 'payment-method-route';
@@ -48,11 +49,15 @@ class PaymentMethodRoute extends AbstractPaymentMethodRoute
         return 'payment-method-route-' . $salesChannelId;
     }
 
+    /**
+     * Though this is a GET route, caching was not added as the output may be altered depending on dynamic rules,
+     * which is not taken into account during the cache hash calculation.
+     */
     #[Route(
         path: '/store-api/payment-method',
         name: 'store-api.payment.method',
-        defaults: ['_entity' => 'payment_method'],
-        methods: ['GET', 'POST']
+        defaults: [PlatformRequest::ATTRIBUTE_ENTITY => PaymentMethodDefinition::ENTITY_NAME],
+        methods: [Request::METHOD_GET, Request::METHOD_POST]
     )]
     public function load(Request $request, SalesChannelContext $context, Criteria $criteria): PaymentMethodRouteResponse
     {

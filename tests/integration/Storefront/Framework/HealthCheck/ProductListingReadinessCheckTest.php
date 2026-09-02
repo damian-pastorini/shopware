@@ -3,7 +3,6 @@
 namespace Shopware\Tests\Integration\Storefront\Framework\HealthCheck;
 
 use Doctrine\DBAL\Connection;
-use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Shopware\Core\Content\Category\CategoryCollection;
 use Shopware\Core\Content\Category\CategoryDefinition;
@@ -11,6 +10,7 @@ use Shopware\Core\Content\Test\Product\ProductBuilder;
 use Shopware\Core\Defaults;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\SystemCheck\Check\Status;
 use Shopware\Core\Framework\Test\TestCaseBase\CacheTestBehaviour;
 use Shopware\Core\Framework\Test\TestCaseBase\DatabaseTransactionBehaviour;
@@ -24,7 +24,7 @@ use Shopware\Storefront\Framework\SystemCheck\ProductListingReadinessCheck;
 /**
  * @internal
  */
-#[CoversClass(ProductListingReadinessCheck::class)]
+#[Package('discovery')]
 class ProductListingReadinessCheckTest extends TestCase
 {
     use CacheTestBehaviour;
@@ -77,7 +77,7 @@ class ProductListingReadinessCheckTest extends TestCase
         $result = $check->run();
 
         static::assertTrue($result->healthy);
-        static::assertSame(Status::SKIPPED, $result->status);
+        static::assertSame(Status::OK, $result->status);
     }
 
     private function createCheck(): ProductListingReadinessCheck
@@ -160,13 +160,16 @@ class ProductListingReadinessCheckTest extends TestCase
     {
         $products = [];
         for ($i = 0; $i < 5; ++$i) {
-            $products[] = (new ProductBuilder($this->ids, 'product-' . $i))
+            $product = (new ProductBuilder($this->ids, 'product-' . $i))
                 ->name('Test-' . $i)
                 ->price(10)
                 ->manufacturer('manufacturer')
                 ->tax('tax')
                 ->visibility($salesChannelId)
                 ->build();
+
+            unset($product['type']);
+            $products[] = $product;
         }
 
         return $products;

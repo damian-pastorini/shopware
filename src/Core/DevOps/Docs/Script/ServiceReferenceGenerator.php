@@ -3,13 +3,11 @@
 namespace Shopware\Core\DevOps\Docs\Script;
 
 use phpDocumentor\Reflection\DocBlock;
-use phpDocumentor\Reflection\DocBlock\Tags\Deprecated;
 use phpDocumentor\Reflection\DocBlock\Tags\Example;
 use phpDocumentor\Reflection\DocBlock\Tags\Generic;
 use phpDocumentor\Reflection\DocBlock\Tags\InvalidTag;
 use phpDocumentor\Reflection\DocBlock\Tags\Method;
 use phpDocumentor\Reflection\DocBlock\Tags\Param;
-use phpDocumentor\Reflection\DocBlock\Tags\Return_;
 use phpDocumentor\Reflection\DocBlock\Tags\TagWithType;
 use phpDocumentor\Reflection\DocBlockFactory;
 use phpDocumentor\Reflection\DocBlockFactoryInterface;
@@ -45,12 +43,12 @@ class ServiceReferenceGenerator implements ScriptReferenceGenerator
     private const TEMPLATE_FILE = __DIR__ . '/../../Resources/templates/service-reference.md.twig';
     private const GENERATED_DOC_FILE = __DIR__ . '/../../Resources/generated/';
 
-    private readonly DocBlockFactoryInterface $docFactory;
-
     /**
      * @var array<string, string>
      */
-    private array $injectedServices = [];
+    protected array $injectedServices = [];
+
+    private readonly DocBlockFactoryInterface $docFactory;
 
     public function __construct(
         private readonly Environment $twig,
@@ -61,12 +59,7 @@ class ServiceReferenceGenerator implements ScriptReferenceGenerator
             'example' => Example::class,
         ]);
 
-        /** @var Method[] $methodDocs */
-        $methodDocs = $this->docFactory->create(
-            new \ReflectionClass(ServiceStubs::class)
-        )->getTagsByName('method');
-
-        foreach ($methodDocs as $methodDoc) {
+        foreach ($this->getServiceStubMethodDocs() as $methodDoc) {
             $this->injectedServices[
                 ltrim((string) $methodDoc->getReturnType(), '\\')
             ] = $methodDoc->getMethodName();
@@ -104,12 +97,17 @@ class ServiceReferenceGenerator implements ScriptReferenceGenerator
     {
         $docBlock = $this->docFactory->create($reflection);
 
-        /** @var Generic[] $tags */
-        $tags = $docBlock->getTagsByName('script-service');
+        $scriptServiceTag = array_first($docBlock->getTagsByName('script-service'));
+        if (!$scriptServiceTag instanceof Generic) {
+            throw DocsException::incorrectGroupForScriptService($reflection->getName());
+        }
 
-        $description = $tags[0]->getDescription();
+        $description = $scriptServiceTag->getDescription();
+        if ($description === null) {
+            throw DocsException::incorrectGroupForScriptService($reflection->getName());
+        }
 
-        if (!$description || !\in_array($description->render(), array_keys(self::GROUPS), true)) {
+        if (!\array_key_exists($description->render(), self::GROUPS)) {
             throw DocsException::incorrectGroupForScriptService($reflection->getName());
         }
 
@@ -131,12 +129,24 @@ class ServiceReferenceGenerator implements ScriptReferenceGenerator
             return \sprintf('./%s#%s', \str_replace('.md', '', self::GROUPS[$this->getGroupForService($reflection)]), strtolower($reflection->getShortName()));
         }
 
-        /** @var non-empty-string $filename */
         $filename = $reflection->getFileName();
+        \assert(\is_string($filename));
 
         $relativePath = str_replace($this->projectDir, '', $filename);
 
         return self::GITHUB_BASE_LINK . $relativePath;
+    }
+
+    /**
+     * @return Method[]
+     */
+    protected function getServiceStubMethodDocs(): array
+    {
+        $tags = $this->docFactory->create(
+            new \ReflectionClass(ServiceStubs::class)
+        )->getTagsByName('method');
+
+        return array_values(array_filter($tags, static fn ($tag) => $tag instanceof Method));
     }
 
     /**
@@ -171,7 +181,7 @@ class ServiceReferenceGenerator implements ScriptReferenceGenerator
             $scriptServices[] = $class;
         }
 
-        if (\count($scriptServices) === 0) {
+        if ($scriptServices === []) {
             throw DocsException::noScriptServicesFound();
         }
         sort($scriptServices);
@@ -228,12 +238,7 @@ class ServiceReferenceGenerator implements ScriptReferenceGenerator
             $reflection = new \ReflectionClass($service);
 
             $docBlock = $this->docFactory->create($reflection);
-            if ($docBlock->hasTag('internal')) {
-                // skip @internal classes
-                continue;
-            }
 
-            /** @var Deprecated|null $deprecated */
             $deprecated = $docBlock->getTagsByName('deprecated')[0] ?? null;
 
             $group = $this->getGroupForService($reflection);
@@ -272,8 +277,10 @@ class ServiceReferenceGenerator implements ScriptReferenceGenerator
     private function getMethods(\ReflectionClass $reflection, array $scriptServices): array
     {
         $methods = [];
+        $reflectionMethods = $reflection->getMethods(\ReflectionMethod::IS_PUBLIC);
+        sort($reflectionMethods);
 
-        foreach ($reflection->getMethods(\ReflectionMethod::IS_PUBLIC) as $method) {
+        foreach ($reflectionMethods as $method) {
             if ($method->getName() === '__construct') {
                 // skip `__construct()`
                 continue;
@@ -289,7 +296,6 @@ class ServiceReferenceGenerator implements ScriptReferenceGenerator
                 continue;
             }
 
-            /** @var Deprecated|null $deprecated */
             $deprecated = $docBlock->getTagsByName('deprecated')[0] ?? null;
 
             $methods[] = [
@@ -314,7 +320,7 @@ class ServiceReferenceGenerator implements ScriptReferenceGenerator
     private function parseArguments(\ReflectionMethod $method, DocBlock $docBlock, array $scriptServices): array
     {
         $arguments = [];
-        /** @var Param[] $paramDocs */
+        /** @var list<Param> $paramDocs */
         $paramDocs = $docBlock->getTagsWithTypeByName('param');
 
         foreach ($method->getParameters() as $parameter) {
@@ -353,7 +359,7 @@ class ServiceReferenceGenerator implements ScriptReferenceGenerator
     }
 
     /**
-     * @param Param[] $paramDocs
+     * @param list<Param> $paramDocs
      */
     private function findDocForParam(array $paramDocs, string $name, \ReflectionMethod $method): Param
     {
@@ -398,7 +404,6 @@ class ServiceReferenceGenerator implements ScriptReferenceGenerator
             return [];
         }
 
-        /** @var Return_[] $tags */
         $tags = $docBlock->getTagsWithTypeByName('return');
         if (\count($tags) < 1) {
             throw DocsException::missingReturnAnnotationForMethod($method->getName(), $method->getDeclaringClass()->getName());
@@ -415,11 +420,9 @@ class ServiceReferenceGenerator implements ScriptReferenceGenerator
      */
     private function getTypeInformation(?\ReflectionType $type, TagWithType $tag, array $scriptServices): array
     {
-        /** @var class-string<object> $typeName */
         $typeName = (string) $tag->getType();
         if ($type instanceof \ReflectionNamedType) {
             // The docBlock probably don't use the FQCN, therefore we use the native return type if we have one
-            /** @var class-string<object> $typeName */
             $typeName = $type->getName();
         }
 
@@ -447,8 +450,10 @@ class ServiceReferenceGenerator implements ScriptReferenceGenerator
     {
         $examples = [];
 
-        /** @var Example $example */
         foreach ($docBlock->getTagsByName('example') as $example) {
+            if (!$example instanceof Example) {
+                continue;
+            }
             $files = [];
 
             foreach (ScriptReferenceDataCollector::getFiles() as $file) {
@@ -457,7 +462,7 @@ class ServiceReferenceGenerator implements ScriptReferenceGenerator
                 }
             }
 
-            if (\count($files) === 0) {
+            if ($files === []) {
                 throw DocsException::exampleFileNotFound(
                     $method->getName(),
                     $method->getDeclaringClass()->getName(),

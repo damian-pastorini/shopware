@@ -71,10 +71,6 @@ export default {
                 this.config.parameters.includeVariants
             );
         },
-
-        logRepository() {
-            return this.repositoryFactory.create('import_export_log');
-        },
     },
 
     methods: {
@@ -105,7 +101,7 @@ export default {
 
         handleProgress(log) {
             this.createNotificationInfo({
-                message: this.$tc('sw-import-export.exporter.messageExportStarted'),
+                message: this.$t('sw-import-export.exporter.messageExportStarted'),
             });
 
             this.isLoading = false;

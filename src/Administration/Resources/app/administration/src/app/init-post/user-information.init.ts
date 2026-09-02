@@ -3,12 +3,19 @@
  */
 
 import { initializeUserNotifications } from 'src/app/store/notification.store';
+import useTheme from 'src/app/composables/use-theme';
+import useModuleIconColors from 'src/app/composables/use-module-icon-colors';
 
 // eslint-disable-next-line sw-deprecation-rules/private-feature-declarations
 export default function initializeUserContext() {
     return new Promise<void>((resolve) => {
         const loginService = Shopware.Service('loginService');
         const userService = Shopware.Service('userService');
+
+        loginService.addOnLoginListener(() => {
+            void useTheme().loadUserTheme();
+            void useModuleIconColors().loadUserModuleIconColors();
+        });
 
         // The user isn't logged in
         if (!loginService.isLoggedIn()) {
@@ -18,10 +25,12 @@ export default function initializeUserContext() {
             return;
         }
 
+        void useTheme().loadUserTheme();
+        void useModuleIconColors().loadUserModuleIconColors();
+
         userService
             .getUser()
             .then((response) => {
-                // eslint-disable-next-line max-len
                 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access,@typescript-eslint/no-unsafe-assignment
                 const data = response?.data;
                 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access

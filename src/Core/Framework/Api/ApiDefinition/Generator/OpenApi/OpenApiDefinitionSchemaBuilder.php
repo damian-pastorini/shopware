@@ -20,6 +20,7 @@ use Shopware\Core\Framework\DataAbstractionLayer\Field\DateTimeField;
 use Shopware\Core\Framework\DataAbstractionLayer\Field\Field;
 use Shopware\Core\Framework\DataAbstractionLayer\Field\FkField;
 use Shopware\Core\Framework\DataAbstractionLayer\Field\Flag\ApiAware;
+use Shopware\Core\Framework\DataAbstractionLayer\Field\Flag\Choice;
 use Shopware\Core\Framework\DataAbstractionLayer\Field\Flag\Deprecated;
 use Shopware\Core\Framework\DataAbstractionLayer\Field\Flag\Extension;
 use Shopware\Core\Framework\DataAbstractionLayer\Field\Flag\IgnoreInOpenapiSchema;
@@ -41,28 +42,32 @@ use Shopware\Core\Framework\DataAbstractionLayer\Field\ReferenceVersionField;
 use Shopware\Core\Framework\DataAbstractionLayer\Field\TranslatedField;
 use Shopware\Core\Framework\DataAbstractionLayer\Field\UpdatedAtField;
 use Shopware\Core\Framework\DataAbstractionLayer\Field\VersionField;
+use Shopware\Core\Framework\DataAbstractionLayer\FieldSerializer\FieldEnumProviderInterface;
+use Shopware\Core\Framework\Deprecation\BCChange\BecomesInternal;
 use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Symfony\Component\Serializer\NameConverter\CamelCaseToSnakeCaseNameConverter;
 
-/**
- * @deprecated tag:v6.8.0 - reason:becomes-internal - Will be internal in v6.8.0
- */
 #[Package('framework')]
+#[BecomesInternal(version: 'v6.8.0')]
 class OpenApiDefinitionSchemaBuilder
 {
     private readonly CamelCaseToSnakeCaseNameConverter $converter;
 
     /**
      * @internal
+     *
+     * @param iterable<FieldEnumProviderInterface> $enumProviders
      */
-    public function __construct()
+    public function __construct(private readonly iterable $enumProviders = [])
     {
         $this->converter = new CamelCaseToSnakeCaseNameConverter(null, false);
     }
 
     /**
-     * @return Schema[]
+     * Builds only the dynamic entity-extension contribution for a JSON-owned component.
+     *
+     * @return array<string, Schema>
      */
     public function getSchemaByDefinition(
         EntityDefinition $definition,
@@ -73,8 +78,10 @@ class OpenApiDefinitionSchemaBuilder
     ): array {
         $schema = [];
         $attributes = [];
+        $requiredProperties = [];
         $requiredAttributes = [];
         $relationships = [];
+        $relationshipAttributes = [];
 
         $schemaName = $this->snakeCaseToCamelCase($definition->getEntityName());
         $uuid = Uuid::fromStringToHex($schemaName);
@@ -96,25 +103,29 @@ class OpenApiDefinitionSchemaBuilder
                 continue;
             }
 
-            if (
+            $isRequired = (
                 $field->is(Required::class)
                 && !$field instanceof VersionField
                 && !$field instanceof ReferenceVersionField
                 && !$field instanceof CreatedAtField
                 && !$field instanceof UpdatedAtField
                 && !\array_key_exists($field->getPropertyName(), $defaults)
-            ) {
-                $requiredAttributes[] = $field->getPropertyName();
+            );
+
+            if ($isRequired) {
+                $requiredProperties[] = $field->getPropertyName();
             }
 
             if ($field instanceof ManyToOneAssociationField || $field instanceof OneToOneAssociationField) {
                 $relationships[] = $this->createToOneLinkage($field, $exampleDetailPath);
+                $relationshipAttributes[] = $this->createRelationShipProperty($field);
 
                 continue;
             }
 
             if ($field instanceof AssociationField) {
                 $relationships[] = $this->createToManyLinkage($field, $exampleDetailPath);
+                $relationshipAttributes[] = $this->createRelationShipProperty($field);
 
                 continue;
             }
@@ -127,6 +138,10 @@ class OpenApiDefinitionSchemaBuilder
                 continue;
             }
 
+            if ($isRequired) {
+                $requiredAttributes[] = $field->getPropertyName();
+            }
+
             if ($field instanceof JsonField) {
                 $attributes[] = $this->resolveJsonField($field);
 
@@ -134,6 +149,26 @@ class OpenApiDefinitionSchemaBuilder
             }
 
             $attr = $this->getPropertyByField($field);
+
+            $enumValues = [];
+            $choice = $field->getFlag(Choice::class);
+            if ($choice instanceof Choice) {
+                $enumValues = $choice->getChoices();
+            }
+
+            foreach ($this->enumProviders as $enumProvider) {
+                if (!$enumProvider->isSupported($definition->getEntityName(), $field->getPropertyName())) {
+                    continue;
+                }
+
+                $enumValues = array_merge($enumValues, $enumProvider->getChoices());
+            }
+
+            $enumValues = array_values(array_unique($enumValues, \SORT_REGULAR));
+
+            if ($enumValues !== [] && \in_array($attr->type, ['string', 'integer', 'number', 'boolean'], true)) {
+                $attr->enum = $enumValues;
+            }
 
             if (\in_array($field->getPropertyName(), ['createdAt', 'updatedAt'], true) || $this->isWriteProtected($field)) {
                 $attr->readOnly = true;
@@ -147,20 +182,27 @@ class OpenApiDefinitionSchemaBuilder
         }
 
         $extensionAttributes = $this->getExtensions($extensions, $exampleDetailPath);
+        $extensionFlatAttributes = [];
 
-        if (!empty($extensionAttributes)) {
+        if ($extensionAttributes !== []) {
             foreach ($extensions as $extension) {
-                if (!$extension instanceof AssociationField) {
+                if (!isset($extensionAttributes[$extension->getPropertyName()])) {
                     continue;
                 }
 
-                $extensionRelationships[] = $extensionAttributes[$extension->getPropertyName()];
+                if ($extension instanceof AssociationField) {
+                    $extensionRelationships[] = $this->createRelationShipProperty($extension);
+
+                    continue;
+                }
+
+                $extensionFlatAttributes[] = $extensionAttributes[$extension->getPropertyName()];
             }
 
             $attributes[] = new Property([
                 'property' => 'extensions',
                 'type' => 'object',
-                'properties' => $extensionAttributes,
+                'properties' => array_values($extensionAttributes),
             ]);
         }
 
@@ -178,6 +220,7 @@ class OpenApiDefinitionSchemaBuilder
                     && !$field instanceof CreatedAtField
                     && !$field instanceof UpdatedAtField
                     && !$field instanceof FkField) {
+                    $requiredProperties[] = $propertyName;
                     $requiredAttributes[] = $propertyName;
                 }
             }
@@ -185,7 +228,9 @@ class OpenApiDefinitionSchemaBuilder
 
         $attributes = [...[new Property(['property' => 'id', 'type' => 'string', 'pattern' => '^[0-9a-f]{32}$'])], ...$attributes];
         $requiredAttributes = array_values(array_unique($requiredAttributes));
+        $requiredProperties = array_values(array_unique($requiredProperties));
 
+        $since = $definition->since();
         if (!$onlyFlat && $apiType === 'jsonapi') {
             $schema[$schemaName . 'JsonApi'] = new Schema([
                 'schema' => $schemaName . 'JsonApi',
@@ -198,15 +243,17 @@ class OpenApiDefinitionSchemaBuilder
                 ],
             ]);
 
-            if (!empty($definition->since())) {
-                $schema[$schemaName . 'JsonApi']->description = 'Added since version: ' . $definition->since();
+            if ($since !== null && $since !== '') {
+                $schema[$schemaName . 'JsonApi']->description = 'Added since version: ' . $since;
             }
 
-            if (\count($requiredAttributes)) {
+            $requiredAttributes = $this->filterRequiredProperties($requiredAttributes, $attributes);
+
+            if ($requiredAttributes !== []) {
                 $schema[$schemaName . 'JsonApi']->allOf[1]->required = $requiredAttributes;
             }
 
-            if (\count($relationships)) {
+            if ($relationships !== []) {
                 $schema[$schemaName . 'JsonApi']->allOf[1]->properties[] = new Property([
                     'property' => 'relationships',
                     'type' => 'object',
@@ -215,23 +262,25 @@ class OpenApiDefinitionSchemaBuilder
             }
         }
 
-        foreach ($relationships as $relationship) {
-            $attributes[] = $this->getRelationShipProperty($relationship);
+        foreach ($relationshipAttributes as $relationshipAttribute) {
+            $attributes[] = $relationshipAttribute;
         }
 
-        if (!empty($extensionRelationships)) {
+        if ($extensionRelationships !== []) {
             $extensionRelationshipsProperty = new Property([
                 'property' => 'extensions',
                 'type' => 'object',
-                'properties' => $extensionAttributes,
+                'properties' => $extensionFlatAttributes,
             ]);
 
-            foreach ($extensionRelationships as $property => $relationship) {
-                $extensionRelationshipsProperty->properties[$property] = $this->getRelationShipProperty($relationship);
+            foreach ($extensionRelationships as $relationship) {
+                $extensionRelationshipsProperty->properties[] = $relationship;
             }
 
             $attributes[] = $extensionRelationshipsProperty;
         }
+
+        $requiredProperties = $this->filterRequiredProperties($requiredProperties, $attributes);
 
         // In some entities all fields are hidden, but not the id. This creates unwanted schemas. This removes it again
         if (\count($attributes) === 1 && $attributes[0]->property === 'id') {
@@ -244,15 +293,91 @@ class OpenApiDefinitionSchemaBuilder
             'properties' => $attributes,
         ]);
 
-        if (!empty($definition->since())) {
-            $schema[$schemaName]->description = 'Added since version: ' . $definition->since();
+        if ($since !== null && $since !== '') {
+            $schema[$schemaName]->description = 'Added since version: ' . $since;
         }
 
-        if (\count($requiredAttributes)) {
-            $schema[$schemaName]->required = $requiredAttributes;
+        if ($requiredProperties !== []) {
+            $schema[$schemaName]->required = $requiredProperties;
         }
 
         return $schema;
+    }
+
+    public function getSchemaName(EntityDefinition $definition): string
+    {
+        return $this->snakeCaseToCamelCase($definition->getEntityName());
+    }
+
+    /**
+     * @return array<string, Schema>
+     */
+    public function getExtensionSchemaByDefinition(EntityDefinition $definition, string $path, bool $forSalesChannel): array
+    {
+        $schemaName = $this->getSchemaName($definition);
+        $exampleDetailPath = $path . '/' . Uuid::fromStringToHex($schemaName);
+        $extensions = [];
+
+        foreach ($definition->getFields() as $field) {
+            if (!$this->shouldFieldBeIncluded($field, $forSalesChannel) || !$field->is(Extension::class)) {
+                continue;
+            }
+
+            $extensions[] = $field;
+        }
+
+        $extensionAttributes = $this->getExtensions($extensions, $exampleDetailPath);
+        $properties = [];
+
+        foreach ($extensions as $extension) {
+            if (!isset($extensionAttributes[$extension->getPropertyName()])) {
+                continue;
+            }
+
+            $properties[] = $extensionAttributes[$extension->getPropertyName()];
+        }
+
+        if ($properties === []) {
+            return [];
+        }
+
+        return [
+            $schemaName => new Schema([
+                'type' => 'object',
+                'schema' => $schemaName,
+                'properties' => [
+                    new Property([
+                        'property' => 'extensions',
+                        'type' => 'object',
+                        'properties' => $properties,
+                    ]),
+                ],
+            ]),
+        ];
+    }
+
+    /**
+     * @param list<string> $requiredProperties
+     * @param list<Property> $properties
+     *
+     * @return list<string>
+     */
+    private function filterRequiredProperties(array $requiredProperties, array $properties): array
+    {
+        $propertyNames = [];
+
+        foreach ($properties as $property) {
+            if (!\is_string($property->property)) {
+                continue;
+            }
+
+            $propertyNames[$property->property] = true;
+        }
+
+        return array_values(array_filter(
+            $requiredProperties,
+            static fn (string $requiredProperty): bool => isset($propertyNames[$requiredProperty])
+        ));
     }
 
     private function snakeCaseToCamelCase(string $input): string
@@ -397,6 +522,10 @@ class OpenApiDefinitionSchemaBuilder
                 $schema = $this->resolveJsonField($field);
             }
 
+            if ($schema === null && !$field instanceof AssociationField) {
+                $schema = $this->getPropertyByField($field);
+            }
+
             if ($schema === null) {
                 continue;
             }
@@ -444,7 +573,7 @@ class OpenApiDefinitionSchemaBuilder
 
         $required = [];
 
-        if (!empty($jsonField->getPropertyMapping())) {
+        if ($jsonField->getPropertyMapping() !== []) {
             $definition->properties = [];
         }
 
@@ -462,7 +591,7 @@ class OpenApiDefinitionSchemaBuilder
             $definition->properties[] = $this->getPropertyByField($field);
         }
 
-        if (\count($required)) {
+        if ($required !== []) {
             $definition->required = $required;
         }
         if ($this->isWriteProtected($jsonField)) {
@@ -583,38 +712,27 @@ class OpenApiDefinitionSchemaBuilder
         return $field->getFlag(Deprecated::class) !== null;
     }
 
-    private function getRelationShipEntity(Property $relationship): string
+    private function createRelationShipProperty(AssociationField $field): Property
     {
-        $relationshipData = $relationship->properties['data'];
-        \assert(\is_array($relationshipData));
-        $type = $relationshipData['type'];
-        $entity = '';
+        $entity = $field->getReferenceDefinition()->getEntityName();
 
-        if ($type === 'object') {
-            $entity = $relationshipData['properties']['type']['example'];
-        } elseif ($type === 'array') {
-            $entity = $relationshipData['items']['properties']['type']['example'];
+        if ($field instanceof ManyToManyAssociationField) {
+            $entity = $field->getToManyReferenceDefinition()->getEntityName();
         }
 
-        return $entity;
-    }
-
-    private function getRelationShipProperty(Property $relationship): Property
-    {
-        $entity = $this->getRelationShipEntity($relationship);
         $entityName = $this->snakeCaseToCamelCase($entity);
 
-        $relationshipData = $relationship->properties['data'];
-        \assert(\is_array($relationshipData));
-
         $property = [
-            'property' => $relationship->property,
-            'description' => $relationship->description,
-            // Create a context with OpenAPI 3.1.0 to ensure descriptions work with $ref
-            '_context' => new OpenApiContext(['version' => OpenApi::VERSION_3_1_0]),
+            'property' => $field->getPropertyName(),
+            // Create a context with OpenAPI 3.2.0 to ensure descriptions work with $ref
+            '_context' => new OpenApiContext(['version' => OpenApi::VERSION_3_2_0]),
         ];
 
-        if ($relationshipData['type'] === 'array') {
+        if ($field->getDescription() !== '') {
+            $property['description'] = $field->getDescription();
+        }
+
+        if (!$field instanceof ManyToOneAssociationField && !$field instanceof OneToOneAssociationField) {
             $property['type'] = 'array';
             $property['items'] = new Schema(['ref' => '#/components/schemas/' . $entityName]);
 

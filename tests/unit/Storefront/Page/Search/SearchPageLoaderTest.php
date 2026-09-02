@@ -6,6 +6,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Shopware\Core\Content\Product\SalesChannel\Search\AbstractProductSearchRoute;
 use Shopware\Core\Framework\Adapter\Translation\AbstractTranslator;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\System\SalesChannel\SalesChannelContext;
 use Shopware\Core\System\SalesChannel\SalesChannelEntity;
 use Shopware\Core\Test\Generator;
@@ -18,6 +19,7 @@ use Symfony\Component\HttpFoundation\Request;
 /**
  * @internal
  */
+#[Package('inventory')]
 #[CoversClass(SearchPageLoader::class)]
 class SearchPageLoaderTest extends TestCase
 {
@@ -29,7 +31,7 @@ class SearchPageLoaderTest extends TestCase
         $eventDispatcher = $this->createMock(EventDispatcherInterface::class);
         $eventDispatcher->expects($this->once())
             ->method('dispatch')
-            ->willReturnCallback(function ($event) use ($salesChannelContext, $request) {
+            ->willReturnCallback(static function ($event) use ($salesChannelContext, $request) {
                 static::assertInstanceOf(SearchPageLoadedEvent::class, $event);
                 static::assertSame($salesChannelContext, $event->getSalesChannelContext());
                 static::assertSame($request, $event->getRequest());
@@ -38,10 +40,10 @@ class SearchPageLoaderTest extends TestCase
             });
 
         $searchPageLoader = new SearchPageLoader(
-            $this->createMock(GenericPageLoader::class),
-            $this->createMock(AbstractProductSearchRoute::class),
+            static::createStub(GenericPageLoader::class),
+            static::createStub(AbstractProductSearchRoute::class),
             $eventDispatcher,
-            $this->createMock(AbstractTranslator::class),
+            static::createStub(AbstractTranslator::class),
         );
 
         $page = $searchPageLoader->load($request, $salesChannelContext);
@@ -57,7 +59,7 @@ class SearchPageLoaderTest extends TestCase
         $eventDispatcher = $this->createMock(EventDispatcherInterface::class);
         $eventDispatcher->expects($this->once())
             ->method('dispatch')
-            ->willReturnCallback(function ($event) use ($salesChannelContext, $request) {
+            ->willReturnCallback(static function ($event) use ($salesChannelContext, $request) {
                 static::assertInstanceOf(SearchPageLoadedEvent::class, $event);
                 static::assertSame($salesChannelContext, $event->getSalesChannelContext());
                 static::assertSame($request, $event->getRequest());
@@ -66,10 +68,10 @@ class SearchPageLoaderTest extends TestCase
             });
 
         $searchPageLoader = new SearchPageLoader(
-            $this->createMock(GenericPageLoader::class),
-            $this->createMock(AbstractProductSearchRoute::class),
+            static::createStub(GenericPageLoader::class),
+            static::createStub(AbstractProductSearchRoute::class),
             $eventDispatcher,
-            $this->createMock(AbstractTranslator::class),
+            static::createStub(AbstractTranslator::class),
         );
 
         $page = $searchPageLoader->load($request, $salesChannelContext);

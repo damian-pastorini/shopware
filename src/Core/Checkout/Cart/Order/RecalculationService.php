@@ -303,7 +303,7 @@ class RecalculationService
         $originalIds = $order->getLineItems()?->getKeys() ?? [];
         $toDeleteIds = \array_values(\array_diff($originalIds, $newIds));
 
-        if (\count($toDeleteIds) > 0) {
+        if ($toDeleteIds !== []) {
             $context->scope(Context::SYSTEM_SCOPE, fn (Context $context) => $this->orderLineItemRepository->delete(
                 \array_map(static fn (string $id) => ['id' => $id], $toDeleteIds),
                 $context
@@ -336,7 +336,7 @@ class RecalculationService
         )->getKeys() ?? [];
         $toDeleteIds = \array_values(\array_diff($originalIds, $newIds));
 
-        if (\count($toDeleteIds) > 0) {
+        if ($toDeleteIds !== []) {
             $context->scope(Context::SYSTEM_SCOPE, fn (Context $context) => $this->orderDeliveryRepository->delete(
                 \array_map(static fn (string $id) => ['id' => $id], $toDeleteIds),
                 $context
@@ -440,14 +440,21 @@ class RecalculationService
         // we switch to the live version that we don't have to consider live version fallbacks inside the calculation
         return $context->live(function ($live) use ($cart): Cart {
             /** @deprecated tag:v6.8.0 - `$isRecalculation` will be removed */
-            $behavior = new CartBehavior($live->getPermissions(), true, isRecalculation: !Feature::isActive('v6.8.0.0'));
+            $behavior = Feature::silent(
+                'v6.8.0.0',
+                fn (): CartBehavior => new CartBehavior($live->getPermissions(), true, isRecalculation: !Feature::isActive('v6.8.0.0')),
+            );
 
             // all prices are now prepared for calculation - starts the cart calculation
             $cart = $this->processor->process($cart, $live, $behavior);
 
             // validate cart against the context rules
             $validatedCart = $this->cartRuleLoader->loadByCart($live, $cart, $behavior)->getCart();
-            $validatedCart->addErrors(...$cart->getErrors()->filter(fn (Error $error) => !$error->isPersistent()));
+            $validatedIds = $validatedCart->getErrors()->map(static fn (Error $error) => $error->getId());
+
+            $validatedCart->addErrors(...$cart->getErrors()->filter(
+                static fn (Error $error) => !$error->isPersistent() && !\in_array($error->getId(), $validatedIds, true)
+            ));
 
             return $validatedCart;
         });

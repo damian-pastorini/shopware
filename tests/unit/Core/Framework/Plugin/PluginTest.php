@@ -4,12 +4,15 @@ namespace Shopware\Tests\Unit\Core\Framework\Plugin;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use Shopware\Core\Framework\Log\Package;
+use Shopware\Core\Framework\Plugin;
 use SwagTestPlugin\SwagTestPlugin;
 
 /**
  * @internal
  */
-#[CoversClass(SwagTestPlugin::class)]
+#[Package('framework')]
+#[CoversClass(Plugin::class)]
 class PluginTest extends TestCase
 {
     private static string $swagTestPluginPath;
@@ -18,8 +21,10 @@ class PluginTest extends TestCase
 
     public static function setUpBeforeClass(): void
     {
-        $pluginsDir = __DIR__ . '/../../../../../src/Core/Framework/Test/Plugin/_fixture/plugins/';
-        self::$swagTestPluginPath = $pluginsDir . '/SwagTestPlugin';
+        $pluginsDir = __DIR__ . '/../../../../../tests/integration/Core/Framework/Plugin/_fixtures/plugins/';
+        $swagTestPluginPath = realpath($pluginsDir . '/SwagTestPlugin');
+        static::assertIsString($swagTestPluginPath);
+        self::$swagTestPluginPath = $swagTestPluginPath;
 
         self::$symlinkedSwagTestPluginPath = sys_get_temp_dir() . '/SymlinkedSwagTest_' . uniqid();
         symlink(self::$swagTestPluginPath, self::$symlinkedSwagTestPluginPath);
@@ -60,5 +65,13 @@ class PluginTest extends TestCase
         $plugin = new SwagTestPlugin(true, 'somePlugin', '/www/');
 
         static::assertSame('/www/somePlugin', $plugin->getBasePath());
+    }
+
+    public function testGetPathWithTrailingSlashBasePath(): void
+    {
+        $plugin = new SwagTestPlugin(true, self::$swagTestPluginPath . '/');
+
+        static::assertSame(self::$swagTestPluginPath . '/src', $plugin->getPath());
+        static::assertStringNotContainsString('//', $plugin->getPath());
     }
 }

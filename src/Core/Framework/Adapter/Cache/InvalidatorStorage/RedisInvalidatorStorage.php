@@ -16,7 +16,9 @@ class RedisInvalidatorStorage extends AbstractInvalidatorStorage
      * @param \Redis|\RedisCluster $redis
      */
     public function __construct(
-        /** @phpstan-ignore shopware.propertyNativeType (Cannot type natively, as Symfony might change the implementation in the future) */
+        /**
+         * @phpstan-ignore shopware.propertyNativeType (Cannot type natively, as Symfony might change the implementation in the future)
+         */
         private $redis,
         private readonly LoggerInterface $logger
     ) {
@@ -76,7 +78,7 @@ class RedisInvalidatorStorage extends AbstractInvalidatorStorage
             $tags = [];
 
             $chunk = $this->redis->sPop(self::KEY, 10000);
-            while (\is_array($chunk) && !empty($chunk)) {
+            while (\is_array($chunk) && $chunk !== []) {
                 foreach ($chunk as $tag) {
                     $tags[] = (string) $tag;
                 }

@@ -2,7 +2,9 @@
 
 namespace Shopware\Core\Checkout\Document\Renderer;
 
+use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
+use Psr\Clock\ClockInterface;
 use Shopware\Core\Checkout\Cart\LineItem\LineItem;
 use Shopware\Core\Checkout\Cart\Price\Struct\CartPrice;
 use Shopware\Core\Checkout\Document\DocumentException;
@@ -46,6 +48,7 @@ final class CreditNoteRenderer extends AbstractDocumentRenderer
         private readonly Connection $connection,
         private readonly DocumentFileRendererRegistry $fileRendererRegistry,
         private readonly ValidatorInterface $validator,
+        private readonly ClockInterface $clock,
     ) {
     }
 
@@ -73,9 +76,9 @@ final class CreditNoteRenderer extends AbstractDocumentRenderer
 
         $template = '@Framework/documents/credit_note.html.twig';
 
-        $ids = \array_map(fn (DocumentGenerateOperation $operation) => $operation->getOrderId(), $operations);
+        $ids = \array_map(static fn (DocumentGenerateOperation $operation) => $operation->getOrderId(), $operations);
 
-        if (empty($ids)) {
+        if ($ids === []) {
             return $result;
         }
 
@@ -88,7 +91,7 @@ final class CreditNoteRenderer extends AbstractDocumentRenderer
                 $orderId = $operation->getOrderId();
                 $invoice = $this->referenceInvoiceLoader->load($orderId, $operation->getReferencedDocumentId(), $rendererConfig->deepLinkCode);
 
-                if (empty($invoice)) {
+                if ($invoice === []) {
                     throw DocumentException::generationError('Can not generate credit note document because no invoice document exists. OrderId: ' . $orderId);
                 }
 
@@ -135,7 +138,7 @@ final class CreditNoteRenderer extends AbstractDocumentRenderer
                 $creditNoteItemIds = $this->getPreviouslyCreditedIdsForInvoice($referencedInvoiceId);
 
                 $creditItems = $liveCreditItems->filter(
-                    fn (OrderLineItemEntity $item) => !\in_array($item->getId(), $invoiceCreditIds, true)
+                    static fn (OrderLineItemEntity $item) => !\in_array($item->getId(), $invoiceCreditIds, true)
                         && !\in_array($item->getId(), $creditNoteItemIds, true)
                 );
 
@@ -154,7 +157,7 @@ final class CreditNoteRenderer extends AbstractDocumentRenderer
                 $referenceDocumentNumber = $referenceInvoiceNumbers[$operation->getOrderId()];
 
                 $config->merge([
-                    'documentDate' => $operation->getConfig()['documentDate'] ?? (new \DateTime())->format(Defaults::STORAGE_DATE_TIME_FORMAT),
+                    'documentDate' => $operation->getConfig()['documentDate'] ?? $this->clock->now()->format(Defaults::STORAGE_DATE_TIME_FORMAT),
                     'documentNumber' => $number,
                     'custom' => [
                         'creditNoteNumber' => $number,
@@ -342,15 +345,30 @@ final class CreditNoteRenderer extends AbstractDocumentRenderer
                 INNER JOIN order_line_item AS oli ON oli.order_id = d.order_id AND oli.order_version_id = d.order_version_id
             WHERE
                 d.id = :referencedInvoiceId
-                AND oli.type = :creditType;
+                AND oli.type = :creditType
+                AND d.order_version_id != :liveVersionId;
         ';
 
+        /**
+         * Documents with order_version_id = LIVE_VERSION are intentionally excluded here,
+         * because under certain (rare) circumstances, the order_version_id of the invoice document
+         * can be LIVE_VERSION instead of an actual snapshot unique version ID.
+         *
+         * This makes it possible to still generate credit notes for invoice documents that have
+         * been created with a LIVE_VERSION order_version_id.
+         *
+         * It also comes with a drawback: if the invoice already contained a credit item,
+         * the new credit note will include it again. Unfortunately, this is the best we can do
+         * to still support these special cases and is still better than failing the credit note generation,
+         * which might be needed years later for a business case.
+         */
         $binaryIds = $this->connection->fetchFirstColumn($sql, [
             'referencedInvoiceId' => Uuid::fromHexToBytes($referencedInvoiceId),
             'creditType' => LineItem::CREDIT_LINE_ITEM_TYPE,
+            'liveVersionId' => Uuid::fromHexToBytes(Defaults::LIVE_VERSION),
         ]);
 
-        return array_map(fn ($id): string => Uuid::fromBytesToHex($id), $binaryIds);
+        return array_map(static fn ($id): string => Uuid::fromBytesToHex($id), $binaryIds);
     }
 
     /**
@@ -371,16 +389,18 @@ final class CreditNoteRenderer extends AbstractDocumentRenderer
                 INNER JOIN order_line_item AS oli ON oli.order_id = d.order_id AND oli.order_version_id = d.order_version_id
             WHERE
                 d.referenced_document_id = :referencedInvoiceId
-                AND dt.technical_name = :creditTechnicalName
+                AND dt.technical_name IN (:creditTechnicalName)
                 AND oli.type = :creditType;
         ';
 
         $binaryIds = $this->connection->fetchFirstColumn($sql, [
             'referencedInvoiceId' => Uuid::fromHexToBytes($referencedInvoiceId),
-            'creditTechnicalName' => self::TYPE,
+            'creditTechnicalName' => [self::TYPE, ZugferdCreditNoteRenderer::TYPE, ZugferdEmbeddedCreditNoteRenderer::TYPE],
             'creditType' => LineItem::CREDIT_LINE_ITEM_TYPE,
+        ], [
+            'creditTechnicalName' => ArrayParameterType::STRING,
         ]);
 
-        return array_map(fn ($id): string => Uuid::fromBytesToHex($id), $binaryIds);
+        return array_map(static fn ($id): string => Uuid::fromBytesToHex($id), $binaryIds);
     }
 }

@@ -11,7 +11,7 @@ use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\System\SalesChannel\SalesChannelContext;
 use Shopware\Storefront\Theme\Exception\ThemeException;
 
-#[Package('framework')]
+#[Package('discovery')]
 class ResolvedConfigLoader extends AbstractResolvedConfigLoader
 {
     /**
@@ -52,9 +52,8 @@ class ResolvedConfigLoader extends AbstractResolvedConfigLoader
 
         $result = new MediaCollection();
 
-        /** @var list<string> $mediaIds */
         $mediaIds = array_keys($mediaItems);
-        if (!empty($mediaIds)) {
+        if ($mediaIds !== []) {
             $criteria = (new Criteria($mediaIds))
                 ->setTitle('theme-service::resolve-media');
 

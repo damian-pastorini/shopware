@@ -127,7 +127,7 @@ describe('src/module/sw-cms/elements/image-slider/component', () => {
         const image = wrapper.get('.sw-cms-el-image-slider__image');
 
         expect(image.attributes('src')).toBe(
-            `${MOCK_ASSET_PATH}administration/administration/static/img/cms/preview_mountain_large.jpg`,
+            `${MOCK_ASSET_PATH}administration/administration/static/img/cms/preview_mountain_large.webp`,
         );
     });
 
@@ -203,6 +203,62 @@ describe('src/module/sw-cms/elements/image-slider/component', () => {
         const navigationButtons = navigationDots.findAll('.sw-cms-el-image-slider__navigation-button');
         expect(navigationButtons).toHaveLength(sliderItemsConfigMock.length);
         expect(navigationButtons.at(0).classes()).toContain('is--active');
+    });
+
+    it.each([
+        null,
+        'none',
+    ])('should not render navigation dots if the config value is %s', async (navigationDotsValue) => {
+        const wrapper = await createWrapper();
+
+        await wrapper.setProps({
+            element: {
+                config: {
+                    ...wrapper.props().element.config,
+                    sliderItems: {
+                        source: 'static',
+                        value: sliderItemsConfigMock,
+                    },
+                    navigationDots: {
+                        source: 'static',
+                        value: navigationDotsValue,
+                    },
+                },
+                data: {
+                    sliderItems: sliderItemsDataMock,
+                },
+            },
+        });
+
+        expect(wrapper.find('.sw-cms-el-image-slider__navigation-dots').exists()).toBe(false);
+    });
+
+    it.each([
+        null,
+        'none',
+    ])('should not render navigation arrows if the config value is %s', async (navigationArrowsValue) => {
+        const wrapper = await createWrapper();
+
+        await wrapper.setProps({
+            element: {
+                config: {
+                    ...wrapper.props().element.config,
+                    sliderItems: {
+                        source: 'static',
+                        value: sliderItemsConfigMock,
+                    },
+                    navigationArrows: {
+                        source: 'static',
+                        value: navigationArrowsValue,
+                    },
+                },
+                data: {
+                    sliderItems: sliderItemsDataMock,
+                },
+            },
+        });
+
+        expect(wrapper.find('.sw-cms-el-image-slider__navigation-arrows').exists()).toBe(false);
     });
 
     it('should render active image correctly after clicking on dot button', async () => {

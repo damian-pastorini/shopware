@@ -82,7 +82,7 @@ class ImportExportLogApiTest extends TestCase
     {
         foreach ([0, 5] as $num) {
             $data = $this->prepareImportExportLogTestData($num);
-            if (!empty($data)) {
+            if ($data !== []) {
                 $this->logRepository->create(array_values($data), $this->context);
             }
 
@@ -294,7 +294,7 @@ class ImportExportLogApiTest extends TestCase
 
             $data[Uuid::fromHexToBytes($uuid)] = [
                 'id' => $uuid,
-                'activity' => $activities[$i % 2] ?? null,
+                'activity' => $activities[$i % 2],
                 'state' => \sprintf('state %d', $i),
                 'userId' => $userIds[$i % 2],
                 'profileId' => $profileIds[$i % 2],

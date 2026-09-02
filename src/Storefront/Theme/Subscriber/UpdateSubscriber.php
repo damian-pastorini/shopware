@@ -18,7 +18,7 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 /**
  * @internal
  */
-#[Package('framework')]
+#[Package('discovery')]
 class UpdateSubscriber implements EventSubscriberInterface
 {
     /**
@@ -88,7 +88,7 @@ class UpdateSubscriber implements EventSubscriberInterface
                 }
             }
 
-            if (!empty($failedThemes)) {
+            if ($failedThemes !== []) {
                 $event->appendPostUpdateMessage('Theme(s): ' . implode(', ', $failedThemes) . ' could not be recompiled.');
             }
         }

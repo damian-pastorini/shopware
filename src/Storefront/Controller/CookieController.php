@@ -22,8 +22,8 @@ use Symfony\Component\Routing\Attribute\Route;
  * @internal
  * Do not use direct or indirect repository calls in a controller. Always use a store-api route to get or put data
  */
+#[Package('discovery')]
 #[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [StorefrontRouteScope::ID]])]
-#[Package('framework')]
 class CookieController extends StorefrontController
 {
     /**
@@ -61,8 +61,8 @@ class CookieController extends StorefrontController
     #[Route(path: '/cookie/consent-offcanvas', name: 'frontend.cookie.consent.offcanvas', options: ['seo' => false], defaults: ['XmlHttpRequest' => true], methods: ['GET'])]
     public function cookieConsentOffcanvas(Request $request, SalesChannelContext $context): Response
     {
-        $featureName = $request->get('featureName', 'wishlist');
-        $cookieName = $request->get('cookieName', 'wishlist-enabled');
+        $featureName = $request->query->get('featureName', 'wishlist');
+        $cookieName = $request->query->get('cookieName', 'wishlist-enabled');
 
         return $this->renderStorefront('@Storefront/storefront/layout/cookie/cookie-consent-offcanvas.html.twig', [
             'featureName' => $featureName,

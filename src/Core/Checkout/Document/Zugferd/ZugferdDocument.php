@@ -3,12 +3,14 @@
 namespace Shopware\Core\Checkout\Document\Zugferd;
 
 use horstoeko\zugferd\codelists\ZugferdAllowanceCodes;
+use horstoeko\zugferd\codelists\ZugferdChargeCodes;
 use horstoeko\zugferd\codelists\ZugferdDutyTaxFeeCategories;
 use horstoeko\zugferd\codelists\ZugferdInvoiceType;
 use horstoeko\zugferd\codelists\ZugferdSchemeIdentifiers;
 use horstoeko\zugferd\codelists\ZugferdUnitCodes;
 use horstoeko\zugferd\ZugferdDocumentBuilder;
 use horstoeko\zugferd\ZugferdDocumentValidator;
+use horstoeko\zugferd\ZugferdSettings;
 use Shopware\Core\Checkout\Cart\Price\AmountCalculator;
 use Shopware\Core\Checkout\Cart\Price\CashRounding;
 use Shopware\Core\Checkout\Cart\Price\Struct\CalculatedPrice;
@@ -16,6 +18,7 @@ use Shopware\Core\Checkout\Cart\Price\Struct\CartPrice;
 use Shopware\Core\Checkout\Cart\Price\Struct\PriceCollection;
 use Shopware\Core\Checkout\Cart\Tax\PercentageTaxRuleBuilder;
 use Shopware\Core\Checkout\Cart\Tax\Struct\CalculatedTax;
+use Shopware\Core\Checkout\Cart\Tax\Struct\CalculatedTaxCollection;
 use Shopware\Core\Checkout\Cart\Tax\TaxCalculator;
 use Shopware\Core\Checkout\Document\DocumentConfiguration;
 use Shopware\Core\Checkout\Document\DocumentException;
@@ -26,9 +29,12 @@ use Shopware\Core\Checkout\Order\Aggregate\OrderLineItem\OrderLineItemEntity;
 use Shopware\Core\Checkout\Order\OrderEntity;
 use Shopware\Core\Checkout\Promotion\Aggregate\PromotionDiscount\PromotionDiscountEntity;
 use Shopware\Core\Framework\DataAbstractionLayer\Pricing\CashRoundingConfig;
+use Shopware\Core\Framework\Deprecation\BCChange\NewRequiredParameter;
 use Shopware\Core\Framework\Feature;
 use Shopware\Core\Framework\Log\Package;
+use Shopware\Core\Framework\Util\FloatComparator;
 use Shopware\Core\System\SalesChannel\SalesChannelDefinition;
+use Symfony\Component\Clock\Clock;
 
 #[Package('after-sales')]
 class ZugferdDocument
@@ -36,6 +42,23 @@ class ZugferdDocument
     public const CHARGE_AMOUNT = 'chargeAmount';
     public const LINE_TOTAL_AMOUNT = 'lineTotalAmount';
     public const ALLOWANCE_AMOUNT = 'allowanceAmount';
+
+    /**
+     * BT-146 is written per billed unit, so the price base quantity (BT-149) must be 1,
+     * otherwise the PEPPOL-EN16931-R120 line amount calculation breaks.
+     */
+    private const PRICE_BASIS_QUANTITY = 1;
+
+    /**
+     * EN16931 caps most amounts at 2 decimals but exempts the unit price (BT-146):
+     * "Unit price amount does not set restrictions on number of decimals, as contrast to the Amount type"
+     * (https://docs.peppol.eu/poacc/billing/3.0/bis/#_unit_price_amount).
+     * 2 decimals violate PEPPOL-EN16931-R120 (slack 0.02) once the rounding error
+     * of the net unit price multiplies with higher quantities.
+     */
+    private const UNIT_PRICE_DECIMALS = 4;
+
+    private const UNIT_PRICE_NODE_PATH = '/rsm:CrossIndustryInvoice/rsm:SupplyChainTradeTransaction/ram:IncludedSupplyChainTradeLineItem/ram:SpecifiedLineTradeAgreement/ram:NetPriceProductTradePrice/ram:ChargeAmount';
 
     /**
      * @deprecated tag:v6.8.0 - Will be removed. Use mappedPrices instead
@@ -54,6 +77,10 @@ class ZugferdDocument
 
     protected float $paidAmount = 0.0;
 
+    protected bool $allowNegativeProductLineItems = false;
+
+    private string $currentDocumentType = ZugferdInvoiceType::INVOICE;
+
     /**
      * @var array{chargeAmount: CalculatedPrice[], lineTotalAmount: CalculatedPrice[], allowanceAmount: CalculatedPrice[]}
      */
@@ -67,11 +94,13 @@ class ZugferdDocument
         protected readonly ZugferdDocumentBuilder $zugferdBuilder,
         protected readonly bool $isGross = false,
     ) {
+        ZugferdSettings::addSpecialDecimalPlacesMap(
+            self::UNIT_PRICE_NODE_PATH,
+            self::UNIT_PRICE_DECIMALS
+        );
     }
 
-    /**
-     * @deprecated tag:v6.8.0 - added new parameter $calculator
-     */
+    #[NewRequiredParameter(version: 'v6.8.0', parameterName: 'calculator', parameterType: AmountCalculator::class)]
     public function getContent(OrderEntity $order/* , AmountCalculator $calculator */): string
     {
         $calculator = func_get_arg(1);
@@ -135,6 +164,17 @@ class ZugferdDocument
         return $this;
     }
 
+    public function withInvoiceReference(string $reference, ?\DateTimeInterface $issueDate = null): self
+    {
+        $this->zugferdBuilder->addDocumentInvoiceReferencedDocument(
+            $reference,
+            null,
+            $issueDate
+        );
+
+        return $this;
+    }
+
     public function withSellerInformation(DocumentConfiguration $documentConfig): self
     {
         $sellerAddress = [
@@ -145,7 +185,7 @@ class ZugferdDocument
         ];
 
         $this->zugferdBuilder
-            ->addDocumentPaymentTerm(null, (new \DateTime())->modify($documentConfig->getPaymentDueDate() ?: '+30 days'))
+            ->addDocumentPaymentTerm(null, \DateTime::createFromImmutable(Clock::get()->now())->modify($documentConfig->getPaymentDueDate() ?: '+30 days'))
             ->setDocumentSeller($documentConfig->getCompanyName() ?? '')
             ->addDocumentSellerTaxRegistration('FC', $documentConfig->getTaxNumber())
             ->addDocumentSellerTaxRegistration('VA', $documentConfig->getVatId())
@@ -168,8 +208,14 @@ class ZugferdDocument
         $tax = $price?->getCalculatedTaxes()?->first();
         $product = $lineItem->getProduct();
 
-        if ($price === null || ($totalNet = $this->getPriceWithFallback($tax, $price)) < 0) {
-            throw DocumentException::generationError('Price can\'t be negative or null: ' . $lineItem->getLabel());
+        if ($price === null) {
+            throw DocumentException::generationError('Price can\'t be null: ' . $lineItem->getLabel());
+        }
+
+        $totalNet = $this->getPriceWithFallback($tax, $price);
+
+        if (!$this->allowNegativeProductLineItems && $totalNet < 0) {
+            throw DocumentException::generationError('Price can\'t be negative: ' . $lineItem->getLabel());
         }
 
         $this->addMappedPrice(self::LINE_TOTAL_AMOUNT, $price);
@@ -180,8 +226,8 @@ class ZugferdDocument
         $this->zugferdBuilder
             ->addNewPosition($parentPosition . $lineItem->getPosition())
             ->setDocumentPositionNetPrice(
-                \round($totalNet / $lineItem->getQuantity(), 2),
-                $lineItem->getProduct()?->getPurchaseUnit() ?? 1,
+                \round($totalNet / $lineItem->getQuantity(), self::UNIT_PRICE_DECIMALS),
+                self::PRICE_BASIS_QUANTITY,
                 ZugferdUnitCodes::REC20_PIECE
             )
             ->setDocumentPositionQuantity($lineItem->getQuantity(), ZugferdUnitCodes::REC20_PIECE)
@@ -205,6 +251,10 @@ class ZugferdDocument
             return $this;
         }
 
+        if (FloatComparator::equals($lineItem->getPrice()->getTotalPrice(), 0.0)) {
+            return $this;
+        }
+
         $discountValue = (float) ($lineItem->getPayload()['value'] ?? 0);
         $isPercentage = (($lineItem->getPayload()['discountType'] ?? null) === PromotionDiscountEntity::TYPE_PERCENTAGE)
             && (abs($lineItem->getTotalPrice()) !== (float) ($lineItem->getPayload()['maxValue'] ?? null));
@@ -213,7 +263,17 @@ class ZugferdDocument
         $type = $isCharge ? self::CHARGE_AMOUNT : self::ALLOWANCE_AMOUNT;
         $this->addMappedPrice($type, $lineItem->getPrice());
 
-        foreach ($lineItem->getPrice()->getCalculatedTaxes() as $calculatedTax) {
+        $allowanceCharge = [
+            'isCharge' => $isCharge,
+            'taxTypeCode' => 'VAT',
+            'calculationPercent' => $isPercentage ? $discountValue : null,
+            'reasonCode' => ZugferdAllowanceCodes::DISCOUNT,
+            'reason' => $lineItem->getReferencedId() ?? $lineItem->getLabel(),
+        ];
+
+        $calculatedTaxes = $lineItem->getPrice()->getCalculatedTaxes();
+
+        foreach ($this->normalizeCalculatedTaxes($calculatedTaxes) as $calculatedTax) {
             $actualAmount = $this->getPriceWithFallback($calculatedTax, $lineItem->getPrice());
 
             if (!Feature::isActive('v6.8.0.0')) {
@@ -223,17 +283,14 @@ class ZugferdDocument
                     $this->addAllowanceAmount($actualAmount);
                 }
             }
+
             $this->zugferdBuilder->addDocumentAllowanceCharge(
                 ...[
+                    ...$allowanceCharge,
                     'actualAmount' => abs($actualAmount),
-                    'isCharge' => $isCharge,
                     'taxCategoryCode' => $this->getTaxCode($calculatedTax),
-                    'taxTypeCode' => 'VAT',
-                    'rateApplicablePercent' => $calculatedTax->getTaxRate(),
-                    'calculationPercent' => $isPercentage ? $discountValue : null,
-                    'basisAmount' => $isPercentage ? round(abs($actualAmount) * 100 / $discountValue, 2) : null,
-                    'reasonCode' => ZugferdAllowanceCodes::DISCOUNT,
-                    'reason' => $lineItem->getReferencedId() ?? $lineItem->getLabel(),
+                    'rateApplicablePercent' => $calculatedTax?->getTaxRate() ?? 0.0,
+                    'basisAmount' => $this->getPercentageBasisAmount($isPercentage, $discountValue, $actualAmount),
                 ]
             );
         }
@@ -241,8 +298,39 @@ class ZugferdDocument
         return $this;
     }
 
-    public function withGeneralOrderData(?\DateTime $deliveryDate, string $documentDate, string $documentNumber, string $isoCode): self
+    public function withDocumentInformation(
+        string $documentDate,
+        string $documentNumber,
+        string $isoCode,
+        string $documentType
+    ): self {
+        $this->currentDocumentType = $documentType;
+
+        $this->zugferdBuilder->setDocumentInformation(
+            $documentNumber,
+            $documentType,
+            new \DateTime($documentDate),
+            $isoCode,
+        );
+
+        return $this;
+    }
+
+    public function withDocumentSupplyChainEvent(\DateTime $deliveryDate): self
     {
+        $this->zugferdBuilder->setDocumentSupplyChainEvent($deliveryDate);
+
+        return $this;
+    }
+
+    public function withGeneralOrderData(
+        ?\DateTime $deliveryDate,
+        string $documentDate,
+        string $documentNumber,
+        string $isoCode,
+    ): self {
+        $this->currentDocumentType = ZugferdInvoiceType::INVOICE;
+
         $this->zugferdBuilder
             ->setDocumentInformation($documentNumber, ZugferdInvoiceType::INVOICE, new \DateTime($documentDate), $isoCode)
             ->setDocumentSupplyChainEvent($deliveryDate);
@@ -253,22 +341,41 @@ class ZugferdDocument
     public function withDelivery(OrderDeliveryCollection $deliveries): self
     {
         foreach ($deliveries as $delivery) {
-            $this->addMappedPrice(self::CHARGE_AMOUNT, $delivery->getShippingCosts());
+            $shippingCosts = $delivery->getShippingCosts();
 
-            foreach ($delivery->getShippingCosts()->getCalculatedTaxes() as $calculatedTax) {
-                $actualAmount = $this->getPriceWithFallback($calculatedTax, $delivery->getShippingCosts());
+            if (FloatComparator::equals($shippingCosts->getTotalPrice(), 0.0)) {
+                continue;
+            }
+
+            $isCorrectionDocument = $this->currentDocumentType === ZugferdInvoiceType::CORRECTION;
+            $isCharge = !$isCorrectionDocument || $shippingCosts->getTotalPrice() > 0.0;
+
+            $this->addMappedPrice(
+                $isCharge ? self::CHARGE_AMOUNT : self::ALLOWANCE_AMOUNT,
+                $shippingCosts
+            );
+
+            $calculatedTaxes = $shippingCosts->getCalculatedTaxes();
+
+            foreach ($this->normalizeCalculatedTaxes($calculatedTaxes) as $calculatedTax) {
+                $actualAmount = $this->getPriceWithFallback($calculatedTax, $shippingCosts);
 
                 if (!Feature::isActive('v6.8.0.0')) {
-                    $this->addChargeAmount($actualAmount);
+                    if ($isCharge) {
+                        $this->addChargeAmount(abs($actualAmount));
+                    } else {
+                        $this->addAllowanceAmount(abs($actualAmount));
+                    }
                 }
+
                 $this->zugferdBuilder->addDocumentAllowanceCharge(
-                    $actualAmount,
-                    true,
+                    abs($actualAmount),
+                    $isCharge,
                     $this->getTaxCode($calculatedTax),
                     'VAT',
-                    $calculatedTax->getTaxRate(),
-                    reasonCode: 'DL',
-                    reason: 'Delivery'
+                    $calculatedTax?->getTaxRate() ?? 0.0,
+                    reasonCode: $this->getDeliveryReasonCode($isCharge, $this->currentDocumentType),
+                    reason: $this->getDeliveryReason($isCharge, $this->currentDocumentType)
                 );
             }
         }
@@ -305,6 +412,13 @@ class ZugferdDocument
     public function getBuilder(): ZugferdDocumentBuilder
     {
         return $this->zugferdBuilder;
+    }
+
+    public function allowNegativeProductLineItems(): self
+    {
+        $this->allowNegativeProductLineItems = true;
+
+        return $this;
     }
 
     /**
@@ -381,6 +495,21 @@ class ZugferdDocument
         $this->mappedPrices[$type][] = $price;
     }
 
+    /**
+     * Yields the calculated taxes to emit an allowance/charge group for, falling back to a single
+     * untaxed group (rate 0.0, category Z) when the price carries no calculated taxes.
+     *
+     * @return list<CalculatedTax|null>
+     */
+    protected function normalizeCalculatedTaxes(CalculatedTaxCollection $calculatedTaxes): array
+    {
+        if ($calculatedTaxes->count() <= 0) {
+            return [null];
+        }
+
+        return array_values($calculatedTaxes->getElements());
+    }
+
     protected function getTaxCode(?CalculatedTax $tax): string
     {
         return match ($tax?->getTaxRate() ?? 0.0) {
@@ -389,15 +518,57 @@ class ZugferdDocument
         };
     }
 
+    protected function getDeliveryReasonCode(bool $isCharge, string $documentType): string
+    {
+        if ($documentType !== ZugferdInvoiceType::CORRECTION) {
+            return ZugferdChargeCodes::DELIVERY;
+        }
+
+        if ($isCharge) {
+            return ZugferdChargeCodes::RETURN_HANDLING;
+        }
+
+        return ZugferdAllowanceCodes::DISCOUNT;
+    }
+
+    protected function getDeliveryReason(bool $isCharge, string $documentType): string
+    {
+        if ($documentType !== ZugferdInvoiceType::CORRECTION) {
+            return 'Delivery';
+        }
+
+        if ($isCharge) {
+            return 'Return handling';
+        }
+
+        return 'Delivery refund';
+    }
+
+    private function getPercentageBasisAmount(bool $isPercentage, float $discountValue, float $actualAmount): ?float
+    {
+        if (!$isPercentage || $discountValue === 0.0) {
+            return null;
+        }
+
+        return round(abs($actualAmount) * 100 / $discountValue, 2);
+    }
+
     private function summary(OrderEntity $order, AmountCalculator $calculator): void
     {
-        if ($this->paidAmount > $order->getAmountTotal()) {
+        if ($this->paidAmount > $order->getAmountTotal() && !$this->allowNegativeProductLineItems) {
             throw DocumentException::generationError('Paid amount is greater than order total amount.');
         }
 
-        $lineTotal = abs($this->calculateTaxes(self::LINE_TOTAL_AMOUNT, $order, $calculator));
-        $chargeAmount = abs($this->calculateTaxes(self::CHARGE_AMOUNT, $order, $calculator));
-        $allowanceAmount = abs($this->calculateTaxes(self::ALLOWANCE_AMOUNT, $order, $calculator));
+        $lineTotal = $this->calculateTaxes(self::LINE_TOTAL_AMOUNT, $order, $calculator);
+        $chargeAmount = $this->calculateTaxes(self::CHARGE_AMOUNT, $order, $calculator);
+        $allowanceAmount = $this->calculateTaxes(self::ALLOWANCE_AMOUNT, $order, $calculator);
+
+        $chargeAmount = abs($chargeAmount);
+        $allowanceAmount = abs($allowanceAmount);
+
+        if ($order->getAmountTotal() >= 0.0) {
+            $lineTotal = abs($lineTotal);
+        }
 
         $this->zugferdBuilder
             ->setDocumentSummation(

@@ -7,12 +7,14 @@ use Shopware\Core\Framework\App\ActionButton\ActionButtonLoader;
 use Shopware\Core\Framework\App\AppCollection;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
+use Shopware\Core\Framework\Log\Package;
 use Shopware\Core\Framework\Test\TestCaseBase\IntegrationTestBehaviour;
 use Shopware\Core\Framework\Uuid\Uuid;
 
 /**
  * @internal
  */
+#[Package('framework')]
 class ActionButtonLoaderTest extends TestCase
 {
     use IntegrationTestBehaviour;
@@ -55,7 +57,7 @@ class ActionButtonLoaderTest extends TestCase
 
         $loadedActionButtons = $this->actionButtonLoader->loadActionButtonsForView('order', 'detail', $this->context);
 
-        usort($loadedActionButtons, fn (array $a, array $b): int => $a['app'] <=> $b['app']);
+        usort($loadedActionButtons, static fn (array $a, array $b): int => $a['app'] <=> $b['app']);
 
         static::assertSame([
             [

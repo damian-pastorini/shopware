@@ -7,6 +7,8 @@ use Shopware\Core\Framework\Log\Package;
 
 /**
  * @extends EntityCollection<UserEntity>
+ *
+ * @codeCoverageIgnore
  */
 #[Package('fundamentals@framework')]
 class UserCollection extends EntityCollection
@@ -16,12 +18,12 @@ class UserCollection extends EntityCollection
      */
     public function getLocaleIds(): array
     {
-        return $this->fmap(fn (UserEntity $user) => $user->getLocaleId());
+        return $this->fmap(static fn (UserEntity $user) => $user->getLocaleId());
     }
 
     public function filterByLocaleId(string $id): self
     {
-        return $this->filter(fn (UserEntity $user) => $user->getLocaleId() === $id);
+        return $this->filter(static fn (UserEntity $user) => $user->getLocaleId() === $id);
     }
 
     public function getApiAlias(): string

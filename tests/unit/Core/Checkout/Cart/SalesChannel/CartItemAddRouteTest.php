@@ -12,8 +12,10 @@ use Shopware\Core\Checkout\Cart\LineItem\LineItem;
 use Shopware\Core\Checkout\Cart\LineItemFactoryRegistry;
 use Shopware\Core\Checkout\Cart\SalesChannel\CartItemAddRoute;
 use Shopware\Core\Framework\Log\Package;
+use Shopware\Core\Framework\Plugin\Exception\DecorationPatternException;
 use Shopware\Core\Framework\RateLimiter\RateLimiter;
 use Shopware\Core\Framework\Uuid\Uuid;
+use Shopware\Core\PlatformRequest;
 use Shopware\Core\System\SalesChannel\SalesChannelContext;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\Request;
@@ -21,10 +23,24 @@ use Symfony\Component\HttpFoundation\Request;
 /**
  * @internal
  */
-#[CoversClass(CartItemAddRoute::class)]
 #[Package('checkout')]
+#[CoversClass(CartItemAddRoute::class)]
 class CartItemAddRouteTest extends TestCase
 {
+    public function testGetDecoratedThrows(): void
+    {
+        static::expectExceptionObject(new DecorationPatternException(CartItemAddRoute::class));
+
+        (new CartItemAddRoute(
+            static::createStub(CartCalculator::class),
+            static::createStub(AbstractCartPersister::class),
+            static::createStub(EventDispatcherInterface::class),
+            static::createStub(LineItemFactoryRegistry::class),
+            static::createStub(RateLimiter::class),
+            static::createStub(CartLocker::class)
+        ))->getDecorated();
+    }
+
     public function testRateLimitationWithoutIp(): void
     {
         $cartItemAddRoute = $this->createCartItemAddRoute(null);
@@ -38,7 +54,7 @@ class CartItemAddRouteTest extends TestCase
         $cartItemAddRoute->add(
             $this->createRequest($item, null),
             new Cart('test'),
-            $this->createMock(SalesChannelContext::class),
+            static::createStub(SalesChannelContext::class),
             null
         );
     }
@@ -56,7 +72,7 @@ class CartItemAddRouteTest extends TestCase
         $cartItemAddRoute->add(
             $this->createRequest($item),
             new Cart(Uuid::randomHex()),
-            $this->createMock(SalesChannelContext::class),
+            static::createStub(SalesChannelContext::class),
             null
         );
     }
@@ -75,9 +91,34 @@ class CartItemAddRouteTest extends TestCase
         $cartItemAddRoute->add(
             $this->createRequest($item),
             new Cart(Uuid::randomHex()),
-            $this->createMock(SalesChannelContext::class),
+            static::createStub(SalesChannelContext::class),
             null
         );
+    }
+
+    public function testAddReturnsContextTokenHeader(): void
+    {
+        $cartItemAddRoute = $this->createCartItemAddRoute(null);
+
+        $item = [
+            'id' => 'line-item-id',
+            'type' => 'line-item-type',
+            'quantity' => 1,
+        ];
+
+        $context = static::createStub(SalesChannelContext::class);
+        $context
+            ->method('getToken')
+            ->willReturn('context-token');
+
+        $response = $cartItemAddRoute->add(
+            $this->createRequest($item, null),
+            new Cart(Uuid::randomHex()),
+            $context,
+            null
+        );
+
+        static::assertSame('context-token', $response->headers->get(PlatformRequest::HEADER_CONTEXT_TOKEN));
     }
 
     public function testRouteUsesLock(): void
@@ -86,7 +127,7 @@ class CartItemAddRouteTest extends TestCase
         $cartLocker
             ->expects($this->once())
             ->method('locked')
-            ->willReturnCallback(fn (SalesChannelContext $context, \Closure $closure) => $closure());
+            ->willReturnCallback(static fn (SalesChannelContext $context, \Closure $closure) => $closure());
 
         $cartItemAddRoute = $this->createCartItemAddRoute(null, $cartLocker);
 
@@ -99,7 +140,7 @@ class CartItemAddRouteTest extends TestCase
         $cartItemAddRoute->add(
             $this->createRequest($item, null),
             new Cart(Uuid::randomHex()),
-            $this->createMock(SalesChannelContext::class),
+            static::createStub(SalesChannelContext::class),
             null
         );
     }
@@ -110,7 +151,7 @@ class CartItemAddRouteTest extends TestCase
         $rateLimiter
             ->expects($this->exactly($expectedCacheKey === null ? 0 : 1))
             ->method('ensureAccepted')
-            ->willReturnCallback(function (string $route, string $key) use ($expectedCacheKey): void {
+            ->willReturnCallback(static function (string $route, string $key) use ($expectedCacheKey): void {
                 static::assertSame($route, RateLimiter::CART_ADD_LINE_ITEM);
                 static::assertSame($expectedCacheKey, $key);
             });
@@ -120,18 +161,18 @@ class CartItemAddRouteTest extends TestCase
             ->expects($this->atLeastOnce())
             ->method('create')
             ->willReturnCallback(
-                fn ($dataBag): LineItem => new LineItem($dataBag['id'], $dataBag['type'], $dataBag['referencedId'] ?? null, $dataBag['quantity'])
+                static fn ($dataBag): LineItem => new LineItem($dataBag['id'], $dataBag['type'], $dataBag['referencedId'] ?? null, $dataBag['quantity'])
             );
 
         if ($cartLocker === null) {
-            $cartLocker = $this->createMock(CartLocker::class);
-            $cartLocker->method('locked')->willReturnCallback(fn (SalesChannelContext $context, \Closure $closure) => $closure());
+            $cartLocker = static::createStub(CartLocker::class);
+            $cartLocker->method('locked')->willReturnCallback(static fn (SalesChannelContext $context, \Closure $closure) => $closure());
         }
 
         return new CartItemAddRoute(
-            $this->createMock(CartCalculator::class),
-            $this->createMock(AbstractCartPersister::class),
-            $this->createMock(EventDispatcherInterface::class),
+            static::createStub(CartCalculator::class),
+            static::createStub(AbstractCartPersister::class),
+            static::createStub(EventDispatcherInterface::class),
             $lineItemFactory,
             $rateLimiter,
             $cartLocker

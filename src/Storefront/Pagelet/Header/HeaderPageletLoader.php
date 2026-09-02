@@ -23,7 +23,7 @@ use Symfony\Component\HttpFoundation\Request;
 /**
  * Do not use direct or indirect repository calls in a PageletLoader. Always use a store-api route to get or put data.
  */
-#[Package('framework')]
+#[Package('discovery')]
 class HeaderPageletLoader implements HeaderPageletLoaderInterface
 {
     /**
@@ -64,7 +64,7 @@ class HeaderPageletLoader implements HeaderPageletLoaderInterface
                 throw SalesChannelException::languageNotFound($context->getLanguageId());
             }
 
-            Feature::callSilentIfInactive('v6.8.0.0', function () use ($contextLanguage, $context, $page): void {
+            Feature::callSilentIfInactive('v6.8.0.0', static function () use ($contextLanguage, $context, $page): void {
                 $page->setActiveLanguage($contextLanguage);
                 $page->setActiveCurrency($context->getCurrency());
             });

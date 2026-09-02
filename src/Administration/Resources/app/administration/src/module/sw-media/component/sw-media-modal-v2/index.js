@@ -13,6 +13,7 @@ export default {
     template,
 
     inject: [
+        'feature',
         'repositoryFactory',
         'mediaService',
     ],
@@ -23,6 +24,12 @@ export default {
     ],
 
     props: {
+        isOpen: {
+            type: Boolean,
+            required: false,
+            default: true,
+        },
+
         initialFolderId: {
             type: String,
             required: false,
@@ -54,7 +61,6 @@ export default {
         allowMultiSelect: {
             type: Boolean,
             required: false,
-            // eslint-disable-next-line vue/no-boolean-default
             default: true,
         },
 
@@ -75,10 +81,28 @@ export default {
             term: '',
             id: Utils.createId(),
             selectedMediaItem: {},
+            activeTab: this.defaultTab,
         };
     },
 
     computed: {
+        mediaModalTabs() {
+            return [
+                {
+                    label: this.$t('sw-media.sw-media-modal-v2.labelTabItemLibrary'),
+                    name: this.tabNameLibrary,
+                    disabled: this.hasUploads,
+                },
+                {
+                    label: this.$t('sw-media.sw-media-modal-v2.labelTabItemUpload'),
+                    name: this.tabNameUpload,
+                    onClick: () => {
+                        this.resetSelection();
+                    },
+                },
+            ];
+        },
+
         mediaRepository() {
             return this.repositoryFactory.create('media');
         },
@@ -103,6 +127,10 @@ export default {
     },
 
     watch: {
+        defaultTab() {
+            this.activeTab = this.defaultTab;
+        },
+
         folderId() {
             this.fetchCurrentFolder();
         },
@@ -152,13 +180,24 @@ export default {
         },
 
         getComponentWidth() {
-            const componentWidth = this.$el.getBoundingClientRect().width;
+            // during teleportation the $el doesn't have a bounding client rect yet
+            const componentWidth = this.$el.getBoundingClientRect?.().width;
+            if (!componentWidth) {
+                return;
+            }
+
             this.compact = componentWidth <= 900;
         },
 
         /*
          * v-model
          */
+        onModalRootChange(isOpen) {
+            if (!isOpen) {
+                this.$emit('modal-close');
+            }
+        },
+
         onEmitModalClosed() {
             this.$emit('modal-close');
         },
@@ -176,6 +215,14 @@ export default {
         /*
          * selection
          */
+        onActiveTabChanged(activeTab) {
+            this.activeTab = activeTab;
+
+            if (activeTab === this.tabNameUpload) {
+                this.resetSelection();
+            }
+        },
+
         refreshList() {
             this.$refs.mediaLibrary.refreshList();
         },

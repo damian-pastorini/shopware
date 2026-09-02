@@ -5,18 +5,20 @@
         class="sw-system-config__global-sales-channel-switch"
     >
         <sw-sales-channel-switch
-            :label="$tc('sw-settings.system-config.labelSalesChannelSelect')"
+            :label="$t('sw-settings.system-config.labelSalesChannelSelect')"
             @change-sales-channel-id="onSalesChannelChanged"
         />
     </div>
+
     {% block sw_system_config_content_card %}
     <mt-card
         v-for="card, index in config"
         :key="index"
         position-identifier="sw-system-config-content"
-        :class="`sw-system-config__card--${index}`"
+        :class="[ `sw-system-config__card--${index}`, card.name ? `sw-system-config__card--${kebabCase(card.name)}` : null ]"
         :is-loading="isLoading"
         :title="getInlineSnippet(card.title)"
+        :subtitle="getInlineSnippet(card.subtitle)"
     >
         <slot name="title">
             <sw-ai-copilot-badge v-if="card.aiBadge" />
@@ -24,31 +26,34 @@
 
         <slot
             name="beforeElements"
-            v-bind="{ card, config: actualConfigData[currentSalesChannelId] }"
+            v-bind="{ card, config: actualConfigData[currentSalesChannelId], currentSalesChannelId }"
         ></slot>
+
         <template
             v-if="salesChannelSwitchable && config.length === 1"
             #toolbar
         >
             <sw-sales-channel-switch
-                :label="$tc('sw-settings.system-config.labelSalesChannelSelect')"
+                :label="$t('sw-settings.system-config.labelSalesChannelSelect')"
                 @change-sales-channel-id="onSalesChannelChanged"
             />
         </template>
+
         <template v-if="hasCssFields">
             {% block sw_system_config_content_compile_notice %}
             <mt-banner variant="attention">
-                {{ $tc('sw-settings.system-config.compileNotice') }}
+                {{ $t('sw-settings.system-config.compileNotice') }}
             </mt-banner>
-
             {% endblock %}
         </template>
+
         <template v-if="!isLoading">
             <template v-for="element in card.elements">
                 <slot
                     name="card-element"
-                    v-bind="{ element: getElementBind(element), config: actualConfigData[currentSalesChannelId], card }"
+                    v-bind="{ element: getElementBind(element), config: actualConfigData[currentSalesChannelId], card, currentSalesChannelId }"
                 >
+                    {% block sw_system_config_content_card_group %}
                     <template v-if="isMeteorComponent(element)">
                         <sw-inherit-wrapper
                             v-model:value="actualConfigData[currentSalesChannelId][element.name]"
@@ -66,6 +71,7 @@
                             </template>
                         </sw-inherit-wrapper>
                     </template>
+
                     <template v-else>
                     {% block sw_system_config_content_card_field %}
                         <sw-inherit-wrapper
@@ -88,13 +94,18 @@
                         </sw-inherit-wrapper>
                     {% endblock %}
                     </template>
+                    {% endblock %}
                 </slot>
             </template>
-            <slot name="card-element-last"></slot>
+            <slot
+                name="card-element-last"
+                v-bind="{ currentSalesChannelId }"
+            ></slot>
         </template>
+
         <slot
             name="afterElements"
-            v-bind="{ card, config: actualConfigData[currentSalesChannelId], index, isNotDefaultSalesChannel, inheritance: actualConfigData.null }"
+            v-bind="{ card, config: actualConfigData[currentSalesChannelId], index, isNotDefaultSalesChannel, inheritance: actualConfigData.null, currentSalesChannelId }"
         >
         </slot>
     </mt-card>

@@ -21,8 +21,8 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
 
-#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [ApiRouteScope::ID]])]
 #[Package('checkout')]
+#[Route(defaults: [PlatformRequest::ATTRIBUTE_ROUTE_SCOPE => [ApiRouteScope::ID]])]
 class PriceActionController extends AbstractController
 {
     /**
@@ -86,11 +86,10 @@ class PriceActionController extends AbstractController
         $taxId = $request->request->getAlnum('taxId');
         $productPrices = $request->request->all('prices');
 
-        if (empty($productPrices)) {
+        if ($productPrices === []) {
             throw CartException::pricesParameterIsMissing();
         }
 
-        $taxRate = null;
         if (Feature::isActive('v6.8.0.0')) {
             $criteria = (new Criteria([$taxId]))
                 ->addFields(['taxRate']);
