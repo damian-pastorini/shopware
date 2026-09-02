@@ -4,6 +4,24 @@
 
 <details>
 
+## State machine actions enforce a single destination per source state
+
+A state machine action now maps to exactly one destination state per source state:
+
+- A migration removed existing duplicates, keeping the oldest transition per state machine, source state, and action name, and replaced the unique key on `state_machine_transition` over `(action_name, state_machine_id, from_state_id, to_state_id)` with `uniq.state_machine_transition.action_name_from_state` over `(action_name, state_machine_id, from_state_id)`.
+- Writing a `state_machine_transition` that has the same state machine, source state, and action name as an existing transition, but a different destination state, now fails against that unique key instead of silently making the action's destination undefined.
+
+If your extension registered a transition that reuses an existing action name (for example `authorize`) from the same source state with its own destination state, register it under its own action name instead. Find affected installations with:
+
+```sql
+SELECT sm.technical_name, f.technical_name AS from_state, t.action_name, COUNT(*) AS destinations
+FROM state_machine_transition t
+JOIN state_machine sm ON sm.id = t.state_machine_id
+JOIN state_machine_state f ON f.id = t.from_state_id
+GROUP BY t.state_machine_id, t.from_state_id, t.action_name
+HAVING COUNT(*) > 1;
+```
+
 ## Composition API extension system is no longer a public entry point
 
 The Administration's Composition API extension system is now internal. `Shopware.Component.createExtendableSetup()` and `Shopware.Component.overrideComponentSetup()` were previously annotated `@experimental stableVersion:v6.8.0 feature:ADMIN_COMPOSITION_API_EXTENSION_SYSTEM`; both are now `@private`, together with the new `Shopware.Component.attachOverrides()`.
@@ -83,6 +101,15 @@ The calculated taxes of the original line item are now distributed proportionall
 This can change cent-level rounding compared to previous versions.
 
 If an extension relies on recalculated taxes for percentage prices or split line items, review the resulting taxes for mixed tax rates, net and gross prices, promotions, and partial quantities.
+
+## Edit order page selects the payment method of the order
+
+`frontend.account.edit-order.change-payment-method` no longer switches the payment method of the sales channel context.
+It passes the selected method to the edit order page as the `paymentMethodId` query parameter, and the page selects the payment method of the order when that parameter is absent.
+
+Storefront templates of the edit order page that render `context.paymentMethod` have to use `page.selectedPaymentMethodId` instead, which is the payment method of the order or the one the customer selected on the page.
+
+Extensions that reacted to the context switch can listen to `Shopware\Core\Checkout\Order\Event\OrderPaymentMethodChangedEvent`, which is dispatched when the customer confirms the change and the payment method of the order really changes.
 
 ## Payment: Removal of Payment Method "Debit Payment"
 
@@ -175,6 +202,12 @@ The Agentic Commerce sales channel features — including product export provide
 
 When no Sales Channel business timezone is configured, document rendering no longer uses the Storefront browser timezone in Shopware 6.8. Documents now render with Twig's configured default timezone (`UTC` unless changed via `twig.date.timezone`) regardless of how they are generated. Set the Sales Channel business timezone if documents should use a merchant-controlled timezone.
 
+## Nullable order reference on `DocumentEntity`
+
+The order reference on `Shopware\Core\Checkout\Document\DocumentEntity` became nullable. `getOrderId()` and `getOrderVersionId()` returned `?string` instead of `string`; documents that are not based on an order returned `null`.
+
+`DocumentEntity::setOrderId()` and `setOrderVersionId()` accepted `?string`. Extensions overriding these setters had to widen their parameter types accordingly.
+
 ## Removed document template variables
 
 The following variables in `src/Core/Framework/Resources/views/documents/includes/position_header.html.twig` have been deprecated and were removed without replacement:
@@ -248,19 +281,15 @@ The Store API route `/store-api/document/download` returns now a standard Shopwa
 
 The `/api/_info/queue.json` endpoint has been removed. You may `/api/_info/message-stats.json` as alternative to get statistics for message queues.
 
-## Newsletter route methods removed and response changed
+## Newsletter route methods removed
 
-The following methods have been removed:
+`AbstractNewsletterSubscribeRoute::subscribe()`, `AbstractNewsletterConfirmRoute::confirm()` and
+`AbstractNewsletterUnsubscribeRoute::unsubscribe()` have been removed. Their replacements
+`subscribeWithResponse()`, `confirmWithResponse()` and `unsubscribeWithResponse()` are now abstract
+and have to be implemented by every class that extends one of those routes.
 
-- `AbstractNewsletterSubscribeRoute::subscribe()`
-- `AbstractNewsletterConfirmRoute::confirm()`
-- `AbstractNewsletterUnsubscribeRoute::unsubscribe()`
-
-The following methods are now abstract and must be implemented by extensions. Their return types have been narrowed from `StoreApiResponse` to their explicit types:
-
-- `subscribeWithResponse()` returns `NewsletterSubscribeRouteResponse`
-- `confirmWithResponse()` returns `SuccessResponse`
-- `unsubscribeWithResponse()` returns `SuccessResponse`
+The return type is `StoreApiResponse`, so an implementation written against 6.7 needs no change. A
+leftover implementation of the removed method is harmless.
 
 ## Removed `/api/_action/mail-template/validate` route
 
@@ -502,6 +531,20 @@ Since tokens are no longer deleted after use, a new scheduled task runs daily to
 
 Automatic promotions without a code are no longer removable as it adds more confusion as to how one gets it back than it helps.
 The blocked-promotion handling in `\Shopware\Core\Checkout\Promotion\Cart\Extension\CartExtension` has been removed.
+
+## Removal of `PromotionCartInformationTrait` helper methods
+
+The helper methods `\Shopware\Core\Checkout\Promotion\Cart\PromotionCartInformationTrait::{addPromotionNotFoundError,addPromotionNotEligibleError}` and `addPromotionNotEligibleError()` are removed, replace any calls in classes that use this trait with `$cart->addErrors()`:
+
+```php
+// Before
+$this->addPromotionNotFoundError($code, $cart);
+$this->addPromotionNotEligibleError($name, $cart);
+
+// After
+$cart->addErrors(new \Shopware\Core\Checkout\Promotion\Cart\Error\PromotionNotFoundError($code));
+$cart->addErrors(new \Shopware\Core\Checkout\Promotion\Cart\Error\PromotionNotEligibleError($name));
+```
 
 ## Removal of `$options` parameter in custom validator's constraints
 
@@ -916,7 +959,7 @@ From now on, price definitions must explicitly implement the
 
 ## Symfony validator is not used to validate the honeypot captcha
 
-The Symfony validator is not used to check the validity of the honeypot captcha, so if it was used to change the validity of the honeypot captcha, overwrite the `isValid` method of the honeypot captcha directly.
+The Symfony validator is not used to check the validity of the honeypot captcha, so if it was used to change the validity of the honeypot captcha, overwrite the `validate` method of the honeypot captcha directly (`isValid` is removed in 6.8, see "Removed `AbstractCaptcha::isValid()` and `AbstractCaptcha::getViolations()` in favor of `validate()`" in the Storefront section).
 
 ## `CmsPageLoadedEvent::$result` now requires `CmsPageCollection` type
 
@@ -1167,11 +1210,31 @@ If you referenced this constant, build your own field list or switch to `Criteri
 
 `\Shopware\Core\Content\ProductExport\Struct\ProductExportResult::getTotal()` and its `$total` constructor argument have been removed. The product export paginates by an `autoIncrement` keyset cursor and no longer computes a grand total per run. Use `hasNextBatch()` to decide whether another batch follows and `getOffset()` for the resume position.
 
+## `AbstractIncrementStorage::increaseToAtLeast()` is now abstract
+
+If your extension extends or decorates `\Shopware\Core\System\NumberRange\ValueGenerator\Pattern\IncrementStorage\AbstractIncrementStorage.php`, implement `increaseToAtLeast(string $configurationId, int $value): void`.
+
+The method must raise the stored increment state to at least the given value without lowering an existing higher state.
+
+
 # Administration
+
+## Deprecated password verification members in `sw-users-permissions-user-listing`
+
+The `loginService` injection, the `confirmPassword` and `isConfirmingPassword` data properties, and the `sw_settings_user_list_delete_modal_input__confirm_password` Twig block in `sw-users-permissions-user-listing` are deprecated and will be removed. Extensions that customize user verification should extend `sw-verify-user-modal` instead.
 
 ## Deprecated `sw-media-upload-v2.getUploadFailureMessage()`
 
 The `getUploadFailureMessage()` method on `sw-media-upload-v2` is deprecated and will be removed without replacement. Upload failure notifications are handled centrally by `sw-upload-status`; extensions should stop calling or overriding this method.
+
+## Removed `integrationService.updateAdmin()`
+
+`Shopware.Service('integrationService').updateAdmin()` was removed. Use the integration repository instead:
+
+```javascript
+const integrationRepository = Shopware.Service('repositoryFactory').create('integration');
+await integrationRepository.save(integration);
+```
 
 <details>
 
@@ -2076,11 +2139,25 @@ const isInside = event.target instanceof Node && this.$el.contains(event.target)
 
 <details>
 
+## Footer collapse headlines and columns now use semantic elements
+
+In `layout/footer/footer.html.twig`, the following nodes changed to semantic elements.
+
+- Collapse section headlines: `<div role="heading">` became `<h2>`.
+- Footer columns wrapper: `<div role="list">` became `<ul>` (`role="list"` is kept so Safari/VoiceOver still exposes it as a list).
+- Footer column: `<div role="listitem">` became `<li>`.
+
 ## Removed `AbstractDomainLoader::load()` in favor of `loadDomains()`
 
 `Shopware\Storefront\Framework\Routing\AbstractDomainLoader::load()` (and the `DomainLoader` / `CachedDomainLoader` implementations) have been removed. Use `loadDomains()` instead, which returns a `Shopware\Storefront\Framework\Routing\Struct\DomainCollection` of `Shopware\Storefront\Framework\Routing\Struct\DomainStruct` objects, keyed by domain URL, instead of `array<string, array<string, string>>`.
 
 `loadDomains()` is now abstract. If you decorate `AbstractDomainLoader`, implement `loadDomains()` and return a `DomainCollection`. If you consume the result, look up entries via the collection (e.g. `$domains->get($url)`) and access the values as objects (e.g. `$domain->url`) instead of array keys (`$domains[$url]['url']`).
+
+## Removed `AbstractCaptcha::isValid()` and `AbstractCaptcha::getViolations()` in favor of `validate()`
+
+`Shopware\Storefront\Framework\Captcha\AbstractCaptcha::isValid()` and `getViolations()` have been removed. Implement the now abstract `validate(Request $request, array $captchaConfig): ConstraintViolationList` instead — an empty list means valid, a non-empty one is rendered as a form error. If your `isValid()` returned `false` without violations, return a violation whose code maps to an `error.*` snippet.
+
+Throughout 6.7 the default `validate()` delegates to the deprecated pair, so a captcha extending `AbstractCaptcha` keeps working. A captcha extending a shipped captcha does not: those implement `validate()` themselves, so an override of only `isValid()`/`getViolations()` is silently ignored — migrate it now. Implement at least one of `validate()`/`isValid()`; the two defaults delegate to each other, so implementing neither recurses.
 
 ## Removal of inline microdata in favour of JSON-LD structured data
 
